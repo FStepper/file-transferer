@@ -1,0 +1,62 @@
+"""Manifest: Beschreibung eines Transfers, dreifach redundant im Drive-Ordner abgelegt."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+from typing import Optional
+
+from vidtransfer.util import atomic_write_bytes
+
+FORMAT = "vidtransfer"
+FORMAT_VERSION = 1
+MANIFEST_NAMES = ("manifest.json", "manifest.2.json", "manifest.3.json")
+
+STATUS_IN_PROGRESS = "in_progress"
+STATUS_COMPLETE = "complete"
+
+
+def _checksum(body: dict) -> str:
+    canonical = json.dumps(body, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def write_manifest(folder: Path, data: dict) -> None:
+    body = {k: v for k, v in data.items() if k != "checksum"}
+    body["format"] = FORMAT
+    body["format_version"] = FORMAT_VERSION
+    body["checksum"] = _checksum(body)
+    raw = json.dumps(body, indent=1, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    for name in MANIFEST_NAMES:
+        atomic_write_bytes(folder / name, raw)
+
+
+def _load_one(path: Path) -> Optional[dict]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("format") != FORMAT:
+        return None
+    if data.get("format_version") != FORMAT_VERSION:
+        return None
+    body = {k: v for k, v in data.items() if k != "checksum"}
+    return data if data.get("checksum") == _checksum(body) else None
+
+
+def read_manifest(folder: Path) -> Optional[dict]:
+    """Erste gültige Kopie; eine abgeschlossene Kopie hat Vorrang.
+
+    (Während Drive synchronisiert, können die drei Kopien kurzzeitig
+    unterschiedliche Stände haben.)
+    """
+    found = [m for m in (_load_one(folder / n) for n in MANIFEST_NAMES) if m]
+    for m in found:
+        if m.get("status") == STATUS_COMPLETE:
+            return m
+    return found[0] if found else None
+
+
+def is_transfer_folder(folder: Path) -> bool:
+    return folder.is_dir() and any((folder / n).exists() for n in MANIFEST_NAMES)
