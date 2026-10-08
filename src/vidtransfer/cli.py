@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import logging
+import os
 import sys
 from pathlib import Path
 
@@ -87,6 +89,11 @@ def cmd_status(a) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Fenster-Apps (PyInstaller, console=False) haben ggf. kein stdout/stderr
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")
     argv = list(sys.argv[1:] if argv is None else argv)
     # macOS übergibt beim Start aus dem Finder ggf. -psn_…
     argv = [x for x in argv if not x.startswith("-psn_")]
@@ -137,5 +144,6 @@ def main(argv: list[str] | None = None) -> int:
     except Cancelled:
         return 130
     except Exception as exc:  # noqa: BLE001 – für die Konsole lesbar ausgeben
+        logging.getLogger(__name__).exception("Befehl %s fehlgeschlagen", a.cmd)
         print(f"\nFehler: {exc}", file=sys.stderr)
         return 1

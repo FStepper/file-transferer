@@ -1,0 +1,29 @@
+name: build-macos
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14        # Apple Silicon (M1/M2/…)
+            arch: arm64
+          - runner: macos-15-intel  # Intel-Macs (läuft auch auf Apple Silicon via Rosetta)
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: ./packaging/build_mac.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VidTransfer-macOS-${{ matrix.arch }}
+          path: dist/VidTransfer-macOS-${{ matrix.arch }}.zip
