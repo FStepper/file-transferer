@@ -85,8 +85,9 @@ class App:
 
         drop = ttk.LabelFrame(main, text="So geht's", padding=12)
         drop.pack(fill="x")
+        where = "das VidTransfer-Symbol im Dock" if IS_MAC else "VidTransfer.exe (oder eine Verknüpfung)"
         ttk.Label(drop, justify="left", text=(
-            "Ordner auf das VidTransfer-Symbol im Dock ziehen:\n"
+            f"Ordner auf {where} ziehen – oder die Buttons nutzen:\n"
             "  •  Video-/Audio-Ordner  →  wird nach Google Drive gesendet\n"
             "  •  Transfer-Ordner aus Google Drive  →  wird wiederhergestellt"
         )).pack(anchor="w")

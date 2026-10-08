@@ -86,13 +86,23 @@ oder ein Tag `v*` pushen).
 /Applications/VidTransfer.app/Contents/MacOS/VidTransfer receive "<Drive-Ordner>" ~/Downloads
 ```
 
-## Entwicklung
+## Entwicklung (Windows)
 
-```bash
-python3 -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"
-pytest
-python -m vidtransfer        # GUI
+Entwickelt wird unter Windows. Der Kern, die CLI und die GUI laufen dort genauso.
+Nur das `.app`-Bundle und der Drop aufs Dock-Symbol sind Mac-spezifisch.
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -e ".[dev]"
+.\.venv\Scripts\python -m pytest
+.\.venv\Scripts\python -m vidtransfer        # GUI
 ```
+
+Eine Test-EXE für Windows (Ordner lassen sich auf die EXE ziehen) baut
+`packaging\build_windows.ps1`. **Die Mac-App lässt sich nicht unter Windows bauen**,
+denn PyInstaller kann nicht cross-kompilieren. Es gibt zwei Wege:
+- Repo nach GitHub pushen und unter *Actions → build-macos → Run workflow* starten.
+  Das ZIP für arm64 und x86_64 liegt danach als Artefakt bereit.
+- Auf dem M2 `./packaging/build_mac.sh` ausführen.
 
 Der Aufbau ist in [PLAN.md](PLAN.md) beschrieben.
