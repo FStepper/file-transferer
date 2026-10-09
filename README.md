@@ -1,95 +1,117 @@
 # VidTransfer
 
-Überträgt große Ordner (MP4, WAV, …) zuverlässig über **Google Drive for desktop**,
-auch wenn die Verbindung instabil ist. Der Ordner wird in Pakete mit
-Reed-Solomon-Parität zerlegt. Fehlen Pakete oder kommen sie beschädigt an,
-rekonstruiert der Empfänger sie automatisch. Jede Datei wird am Ende per SHA-256
-geprüft.
+Transfers large folders (MP4, WAV, …) reliably via **Google Drive for desktop**,
+even over an unstable connection. The folder is split into packets with
+Reed-Solomon parity. If packets go missing or arrive damaged, the receiver
+reconstructs them automatically, and every file is verified with SHA-256 at the end.
 
-## Bedienung (Mac)
+> The app's user interface is in German; this documentation is in English.
 
-**Senden**
-1. Einen Ordner (z. B. `Drehtag 3`) auf das **VidTransfer-Symbol** im Dock oder Finder ziehen.
-2. Die App legt in Google Drive den Ordner `Drehtag 3` an und schreibt dort die Pakete hinein.
-3. Google Drive lädt die Pakete hoch. **Die App so lange geöffnet lassen**, denn sie
-   verhindert, dass der Mac in den Ruhezustand geht.
+## Usage (Mac)
 
-Bricht etwas ab (Absturz, Neustart, Ordner geändert)? Einfach denselben Ordner erneut
-draufziehen. Vorhandene Pakete werden übersprungen, defekte ersetzt.
+**Sending**
+1. Drag a folder (e.g. `Shoot Day 3`) onto the **VidTransfer icon** in the Dock or Finder.
+2. The app creates the folder `Shoot Day 3` in Google Drive and writes the packets into it.
+3. Google Drive uploads the packets. **Keep the app open until the upload is done**,
+   because it prevents the Mac from going to sleep.
 
-**Empfangen**
-1. Den Ordner `Drehtag 3` aus Google Drive auf das VidTransfer-Symbol ziehen.
-2. Das Ziel wählen (Standard: Downloads).
-3. Die App prüft die Pakete, repariert fehlende, entpackt alles und prüft jede Datei.
-   Das geht auch schon, während der Sender noch hochlädt. Die App wartet dann auf
-   die fehlenden Pakete.
+Something went wrong (crash, restart, folder changed)? Just drag the same folder
+onto the app again. Existing packets are skipped and damaged ones replaced.
 
-Beim Empfang entsteht zunächst `Drehtag 3 (wird empfangen)`. Erst wenn alles
-geprüft ist, wird der Ordner in `Drehtag 3` umbenannt.
+**Receiving (unpacking)**
+1. Drag the folder `Shoot Day 3` from Google Drive onto the VidTransfer icon,
+   or click **„Aus Drive empfangen …“**.
+2. Choose the destination (default: Downloads).
+3. The app verifies the packets, repairs missing ones, unpacks everything and
+   verifies every file. This already works while the sender is still uploading;
+   the app then waits for the missing packets.
 
-> Tipp: Im Drive-Modus „Streamen“ lädt Drive die Pakete erst beim Lesen herunter.
-> Das funktioniert, ist aber langsamer. Für den Transfer-Ordner kann man in Drive
-> „Offline verfügbar machen“ wählen.
+How unpacking stays safe:
+- Everything is written to `Shoot Day 3 (receiving)` first. Only once every file has
+  been verified is the folder renamed to `Shoot Day 3`.
+- Each file is first written as a hidden `.<name>.vtpart` and only gets its real
+  name once its SHA-256 matches. A half-written or corrupt file never appears under
+  its real name.
+- **Interrupted?** (cancelled, crash, Mac switched off) Start receiving again and
+  pick the same destination. Finished files are skipped, the rest is completed.
+- Before anything is written, the app checks that there is **enough free space**.
+- At the end, `VidTransfer-Report.txt` in the restored folder lists every file with
+  its size and SHA-256.
 
-## Fehlertoleranz
+**Verify only**
 
-| Einstellung | Standard | Bedeutung |
+**„Nur prüfen …“** (or `vidtransfer verify`) downloads and checks all packets and
+the whole content, without unpacking anything. It reports whether the transfer is
+completely recoverable. This is useful before the sender deletes the original data.
+
+> Tip: In Drive's "Stream files" mode, packets are only downloaded when they are
+> read. That works, but it is slower. You can mark the transfer folder as
+> "Available offline" in Drive.
+
+## Fault tolerance
+
+| Setting | Default | Meaning |
 |---|---|---|
-| `k` | 10 | Datenpakete pro Stripe |
-| `m` | 3 | Paritätspakete pro Stripe: bis zu 3 von 13 Paketen dürfen fehlen oder defekt sein |
-| `block_mib` | 32 | Paketgröße in MiB |
-| `zstd_level` | 3 | Kompression (bringt bei MP4 fast nichts, bei WAV ein paar Prozent; 0 = aus) |
+| `k` | 10 | data packets per stripe |
+| `m` | 3 | parity packets per stripe: up to 3 of 13 packets may be missing or damaged |
+| `block_mib` | 32 | packet size in MiB |
+| `zstd_level` | 3 | compression (hardly helps for MP4, a few percent for WAV; 0 = off) |
 
-Der Mehraufwand liegt bei `m / k` = 30 %. Ändern lässt sich das in
-`~/Library/Application Support/VidTransfer/config.json`. Das Log liegt unter
+The overhead is `m / k` = 30 %. You can change these settings in
+`~/Library/Application Support/VidTransfer/config.json`. The log is in
 `~/Library/Logs/VidTransfer/`.
 
 ## Installation
 
-Fertige App: `VidTransfer-macOS-arm64.zip` (Apple Silicon: M1/M2/…) bzw.
-`VidTransfer-macOS-x86_64.zip` (Intel; läuft über Rosetta auch auf Apple Silicon).
-Entpacken und `VidTransfer.app` nach **Programme** ziehen.
+Prebuilt app: `VidTransfer-macOS-arm64.zip` (Apple Silicon: M1/M2/…) or
+`VidTransfer-macOS-x86_64.zip` (Intel; also runs on Apple Silicon via Rosetta).
+Unzip it and drag `VidTransfer.app` into **Applications**.
 
-Die App ist nicht von Apple notarisiert. Beim ersten Start daher **Rechtsklick → Öffnen**.
-Meldet macOS „App ist beschädigt“, einmal im Terminal ausführen:
+The app is not notarized by Apple, so open it the first time via **right-click → Open**.
+If macOS says the app "is damaged", run this once in Terminal:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/VidTransfer.app
 ```
 
-Beim ersten Zugriff fragt macOS nach der Erlaubnis für Google Drive bzw.
-Downloads. Bitte erlauben.
+The first time the app accesses Google Drive or Downloads, macOS asks for
+permission. Please allow it.
 
-## App bauen
+## Building the app
 
-Auf dem Mac (Python ≥ 3.10 von [python.org](https://www.python.org/downloads/macos/)):
+On the Mac (Python ≥ 3.10 from [python.org](https://www.python.org/downloads/macos/)):
 
 ```bash
 ./packaging/build_mac.sh
 ```
 
-Die Intel-Version lässt sich auf dem M2 ebenfalls bauen (läuft über Rosetta):
+The Intel version can also be built on the M2 (runs via Rosetta):
 
 ```bash
 ./packaging/build_mac.sh x86_64
 ```
 
-Ergebnis: `dist/<arch>/VidTransfer.app` und `dist/VidTransfer-macOS-<arch>.zip`.
-Alternativ baut der GitHub-Workflow `build-macos` beide Varianten (manuell starten
-oder ein Tag `v*` pushen).
+Result: `dist/<arch>/VidTransfer.app` and `dist/VidTransfer-macOS-<arch>.zip`.
+Alternatively, the GitHub workflow `build-macos` builds both variants (start it
+manually or push a `v*` tag).
 
-## Kommandozeile
+## Command line
 
 ```bash
-/Applications/VidTransfer.app/Contents/MacOS/VidTransfer send   ~/Videos/Drehtag3
-/Applications/VidTransfer.app/Contents/MacOS/VidTransfer status "~/Library/CloudStorage/GoogleDrive-…/My Drive/Drehtag3"
-/Applications/VidTransfer.app/Contents/MacOS/VidTransfer receive "<Drive-Ordner>" ~/Downloads
+VT=/Applications/VidTransfer.app/Contents/MacOS/VidTransfer
+$VT send    ~/Videos/ShootDay3
+$VT status  "$HOME/Library/CloudStorage/GoogleDrive-…/My Drive/ShootDay3"   # quick, downloads nothing
+$VT verify  "<Drive folder>"                # check all packets + content, no unpacking
+$VT receive "<Drive folder>" ~/Downloads    # resumes automatically if interrupted
 ```
 
-## Entwicklung (Windows)
+Exit codes: `0` success, `1` error, `2` transfer incomplete or not recoverable
+(`status`/`verify`), `130` cancelled.
 
-Entwickelt wird unter Windows. Der Kern, die CLI und die GUI laufen dort genauso.
-Nur das `.app`-Bundle und der Drop aufs Dock-Symbol sind Mac-spezifisch.
+## Development (Windows)
+
+Development happens on Windows. The core, the CLI and the GUI run there just the
+same; only the `.app` bundle and dropping onto the Dock icon are Mac-specific.
 
 ```powershell
 python -m venv .venv
@@ -98,11 +120,15 @@ python -m venv .venv
 .\.venv\Scripts\python -m vidtransfer        # GUI
 ```
 
-Eine Test-EXE für Windows (Ordner lassen sich auf die EXE ziehen) baut
-`packaging\build_windows.ps1`. **Die Mac-App lässt sich nicht unter Windows bauen**,
-denn PyInstaller kann nicht cross-kompilieren. Es gibt zwei Wege:
-- Repo nach GitHub pushen und unter *Actions → build-macos → Run workflow* starten.
-  Das ZIP für arm64 und x86_64 liegt danach als Artefakt bereit.
-- Auf dem M2 `./packaging/build_mac.sh` ausführen.
+`packaging\build_windows.ps1` builds a test EXE for Windows (folders can be dropped
+onto the EXE). **The Mac app cannot be built on Windows**, because PyInstaller does
+not cross-compile. There are two ways:
+- Push the repo to GitHub and start *Actions → build-macos → Run workflow*.
+  The ZIPs for arm64 and x86_64 are then available as artifacts.
+- Run `./packaging/build_mac.sh` on the M2.
 
-Der Aufbau ist in [PLAN.md](PLAN.md) beschrieben.
+Conventions: code comments, docstrings, log messages and generated files are in
+English; texts shown to the user (GUI, CLI output, error messages, macOS permission
+prompts) are in German.
+
+The design is described in [PLAN.md](PLAN.md).

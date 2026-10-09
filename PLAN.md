@@ -1,207 +1,218 @@
 # VidTransfer – Plan
 
-Ziel: Einen Ordner mit großen MP4-/WAV-Dateien über eine instabile Verbindung
-übertragen und auf der Gegenseite **zuverlässig wieder entpacken**. Der Transport
-läuft über den lokal installierten Google-Drive-Client (Google Drive for desktop).
-Zielplattform ist **macOS** (Apple Silicon M2, ggf. Intel), entwickelt wird unter
-Windows. Die App wird als eigenständiges `.app`-Bundle ausgeliefert, also ohne
-Python-Installation.
+Goal: transfer a folder of large MP4/WAV files over an unstable connection and
+**reliably unpack it again** on the other side. Transport is handled by the
+locally installed Google Drive client (Google Drive for desktop). The target
+platform is **macOS** (Apple Silicon M2, possibly Intel); development happens on
+Windows. The app ships as a self-contained `.app` bundle, so no Python
+installation is needed.
 
-## Bedienung
+## Usage
 
-- **Senden:** Ordner auf das App-Symbol (Finder/Dock) ziehen. Die App legt in
-  Google Drive einen Ordner **mit demselben Namen** an und schreibt dort die Pakete hinein.
-- **Entpacken:** Den Ordner aus Google Drive auf das App-Symbol ziehen und das Ziel
-  wählen. Die App prüft und repariert die Pakete, entpackt sie und prüft jede Datei
-  per SHA-256 (Details: [Entpacken](#entpacken)).
-- Alternativ gibt es Buttons im Fenster und eine CLI
-  (`vidtransfer send|receive|verify|status|list`).
+- **Send:** drag a folder onto the app icon (Finder/Dock). The app creates a
+  folder **with the same name** in Google Drive and writes the packets into it.
+- **Unpack:** drag the folder from Google Drive onto the app icon and choose a
+  destination. The app verifies and repairs the packets, unpacks them and checks
+  every file with SHA-256 (details: [Unpacking](#unpacking)).
+- Alternatively there are buttons in the window and a CLI
+  (`vidtransfer send|receive|verify|status`, later `list`).
 
 ## Pipeline
 
 ```
-Sender:    Ordner → Container v2 (pro Datei: Record-Header + roh/zstd) → Stripes
-           → Reed-Solomon (zfec): k Daten- + m Paritätspakete → Drive-Ordner
-Empfänger: Index lesen → Pakete vorab laden + prüfen (parallel) → fehlende/kaputte
-           per Parität rekonstruieren → Records → Dateien (atomar) + SHA-256
+Sender:    folder → container v2 (per file: record header + raw/zstd) → stripes
+           → Reed-Solomon (zfec): k data + m parity packets → Drive folder
+Receiver:  read index → prefetch + verify packets (in parallel) → reconstruct
+           missing/damaged ones from parity → records → files (atomic) + SHA-256
 ```
 
-- **Kompression pro Datei:** MP4/MOV/MXF werden roh gespeichert, weil sie sich
-  praktisch nicht weiter komprimieren lassen. WAV/AIFF und Sonstiges werden per
-  zstd Level 3 komprimiert, aber nur, wenn eine Probe (erste 4 MiB) mindestens 3 %
-  spart. zstd ist schnell genug, dass es nie der Engpass ist.
-- **Fehlertoleranz:** Standard ist k = 10 und m = 3 bei 32 MiB pro Paket. Aus
-  *beliebigen* 10 der 13 Pakete eines Stripes lässt sich der Stripe vollständig
-  wiederherstellen. Der Mehraufwand liegt bei 30 %.
-- **Paketformat (`sNNNNNN_II.vtp`):** 80-Byte-Header (Magic, Version, k, m,
-  Index, Transfer-ID, Stripe-Nr., Stripe-Länge, Payload-Länge, SHA-256, CRC32),
-  danach die Nutzdaten. Jedes Paket ist damit für sich allein prüfbar.
-- **Manifest:** Liegt 3× redundant vor (`manifest.json`, `.2`, `.3`) und hat eine
-  eigene Prüfsumme. Es enthält Parameter, Paket-Hashes und den **Datei-Index**
-  (siehe unten).
-- **Speicher/Platz:** Es wird immer nur ein Stripe lokal zwischengespeichert
-  (≈ 0,8 GB). Ins Drive kommen nur fertige Pakete (tmp-Datei + atomares Umbenennen).
+(Implemented today: format v1 = one zstd-compressed tar stream; see below.)
 
-## Container-Format v2 (Grundlage für gutes Entpacken)
+- **Per-file compression (v2):** MP4/MOV/MXF are stored raw, since they hardly
+  compress any further. WAV/AIFF and everything else use zstd level 3, but only if
+  a sample (first 4 MiB) saves at least 3 %. zstd is fast enough never to be the
+  bottleneck.
+- **Fault tolerance:** the default is k = 10 and m = 3 with 32 MiB per packet.
+  *Any* 10 of a stripe's 13 packets fully restore the stripe. The overhead is 30 %.
+- **Packet format (`sNNNNNN_II.vtp`):** 80-byte header (magic, version, k, m,
+  index, transfer ID, stripe number, stripe length, payload length, SHA-256,
+  CRC32), followed by the payload. Every packet can be checked on its own.
+- **Manifest:** stored three times (`manifest.json`, `.2`, `.3`) with its own
+  checksum. It contains the parameters, packet hashes and the **file index**
+  (see below).
+- **Memory/disk:** only one stripe is buffered locally at a time (≈ 0.8 GB). Only
+  finished packets go into Drive (temporary file + atomic rename).
 
-v1 ist ein einziger zstd-komprimierter tar-Strom. Das ist einfach, hat aber eine
-Schwäche: Ab einer nicht rettbaren Stelle ist **alles Folgende** verloren, und
-man kann nicht gezielt zu einer Datei springen. v2 ersetzt tar + Gesamt-zstd
-durch einen eigenen, einfachen Container:
+## Container format v2 (foundation for good unpacking)
+
+v1 is a single zstd-compressed tar stream. That is simple, but it has a weakness:
+everything **after** an unrecoverable spot is lost, and there is no way to jump
+straight to one file. v2 replaces tar + whole-stream zstd with a simple container
+of its own:
 
 ```
-Strom = Record | Record | … | End-Record
+stream = record | record | … | end record
 
-Record = [Record-Header][Daten]
-  Record-Header (fest + variabel, mit CRC32):
-    Magic "VTRC", Version, Typ (Datei/Ordner/Ende), Flags (roh|zstd),
-    Pfad (UTF-8, NFC), Größe original, Größe gespeichert, mtime, Modus,
-    SHA-256 des Originals, CRC32 über den Header
-  Daten: Originalbytes oder genau ein zstd-Frame
+record = [record header][data]
+  record header (fixed + variable part, with CRC32):
+    magic "VTRC", version, type (file/dir/end), flags (raw|zstd),
+    path (UTF-8, NFC), original size, stored size, mtime, mode,
+    SHA-256 of the original, CRC32 over the header
+  data: original bytes or exactly one zstd frame
 ```
 
-Dazu kommt im Manifest ein **Index**: für jede Datei Pfad, Größe, SHA-256, mtime,
-Kompression sowie der **Offset und die Länge im Strom**. Daraus ergibt sich direkt,
-welche Stripes eine Datei belegt.
+In addition, the manifest contains an **index**: for every file its path, size,
+SHA-256, mtime and compression, plus its **offset and length in the stream**. This
+directly tells which stripes a file occupies.
 
-Was das bringt:
+What this enables:
 
-| Fähigkeit | v1 (tar+zstd) | v2 |
+| Capability | v1 (tar+zstd) | v2 |
 |---|---|---|
-| Entpacken während des Uploads (Streaming) | ✔ | ✔ (Record-Header sind selbstbeschreibend) |
-| Fortsetzen nach Abbruch | ✖ (von vorn) | ✔ (fertige Dateien überspringen, an Offset springen) |
-| Einzelne Dateien wiederherstellen | ✖ | ✔ (nur die benötigten Stripes laden) |
-| Teilrettung bei nicht rettbarem Stripe | ✖ (Rest verloren) | ✔ (nur betroffene Dateien fehlen) |
-| Ohne Manifest entpacken (Notfall) | eingeschränkt | ✔ (Resync über Magic + CRC) |
+| Unpack while the upload is running (streaming) | ✔ | ✔ (record headers are self-describing) |
+| Resume after interruption | ✔ (finished files skipped, but the stream is re-read from the start) | ✔ (jump straight to the offset) |
+| Restore single files | ✖ | ✔ (only the required stripes are loaded) |
+| Partial recovery if a stripe is lost for good | ✖ (rest is lost) | ✔ (only affected files are missing) |
+| Unpack without manifest (emergency) | limited | ✔ (resync via magic + CRC) |
 
-v1-Transfers bleiben lesbar. Der Empfänger erkennt das Format an
+v1 transfers remain readable. The receiver detects the format via
 `manifest.format_version`.
 
-## Entpacken
+## Unpacking
 
-### Ablauf
+### Flow
 
-1. **Erkennen:** Ein Ordner mit `manifest*.json` gilt als Transfer-Ordner. Eine
-   gültige Kopie wird gewählt, eine abgeschlossene hat Vorrang.
-2. **Vorabprüfung**, bevor etwas geschrieben wird:
-   - **Freier Speicher** am Ziel ≥ Summe der Originalgrößen + 1 Stripe +
-     5 % Reserve. Andernfalls gibt es eine klare Meldung mit den genauen Zahlen.
-   - **Ziel:** `<Ziel>/<Name>`. Existiert der Ordner schon und stammt er vom
-     *selben* Transfer (Statusdatei, siehe unten), wird **fortgesetzt**. Sonst wird
-     `<Name> (2)` angelegt.
-   - **Schneller Status** nur über Header und Dateigrößen: Wie viele Stripes sind
-     vollständig, reparierbar oder fehlen noch? Das wird in der GUI angezeigt,
-     bevor gelesen wird.
-3. **Pakete beschaffen (Prefetch):** Ein Thread-Pool (4 Threads) liest die
-   Pakete der nächsten 2–3 Stripes voraus. Im Drive-Modus „Streamen“ stößt genau
-   das den Download an, und zwar parallel statt Datei für Datei. Dabei wird gleich
-   der SHA-256 geprüft (hashlib gibt den GIL frei, nutzt also mehrere Kerne).
-   - Zuerst werden die Datenpakete gelesen. Paritätspakete werden nur
-     angefasst, wenn ein Datenpaket fehlt oder defekt ist. Das spart Download.
-   - **Timeout pro Paket:** Kommt nach 5 min kein Fortschritt (Platzhalter hängt),
-     gilt das Paket vorerst als fehlend. Steht Parität bereit, geht es damit
-     weiter. Sonst wird später erneut versucht.
-4. **Stripe zusammensetzen:** Bei k gültigen Datenpaketen werden sie direkt
-   gelesen, sonst wird per zfec rekonstruiert (in 1-MiB-Scheiben, wenig RAM).
-   Gibt es weniger als k gültige Pakete, wird gewartet (Upload läuft noch / Drive
-   synchronisiert noch), mit Anzeige „Stripe 17: 8/10 – warte …“.
-5. **Records schreiben:**
-   - Jede Datei wird zuerst als `.<name>.vtpart` geschrieben. Erst wenn die
-     Länge stimmt und der **SHA-256 passt**, wird sie per `fsync` gesichert und
-     atomar umbenannt. Danach wird die mtime gesetzt. Eine halbe oder falsche Datei
-     liegt also nie unter dem echten Namen.
-   - Ordner (auch leere) werden angelegt, ihre mtimes am Ende gesetzt.
-   - Nach jeder fertigen Datei wird die Statusdatei aktualisiert.
-6. **Abschluss:**
-   - Jede Datei im Index muss vorhanden und geprüft sein. Es darf keine Dateien
-     geben, die nicht im Index stehen.
-   - Ein **Empfangsbericht** (`VidTransfer-Bericht.txt`) wird geschrieben: Dateien,
-     Größen, SHA-256, reparierte Stripes, Dauer.
-   - Erst danach wird `<Name> (wird empfangen)` in `<Name>` umbenannt.
-   - Anschließend gibt es eine Mitteilung und die Buttons **„Im Finder zeigen“**
-     und optional **„Transfer-Ordner in Drive löschen …“** (mit Rückfrage, nie
-     automatisch).
+1. **Detect:** a folder containing `manifest*.json` is a transfer folder. A valid
+   copy is chosen; a completed one takes precedence.
+2. **Pre-checks before anything is written:** ✔
+   - **Free space** at the destination ≥ sum of original sizes + 1 stripe + 5 %
+     reserve. Otherwise a clear message with the exact numbers is shown.
+   - **Destination:** `<dest>/<name>`, unpacked into `<name> (receiving)` first.
+     If that working folder already exists and belongs to the *same* transfer
+     (state file, see below), the receive is **resumed**; otherwise
+     `<name> (2)` is used.
+   - **Quick status** from headers and file sizes only: how many stripes are
+     complete, repairable or still missing. It is shown in the GUI log before
+     reading starts.
+3. **Fetch packets (prefetch, phase 6):** a thread pool (4 threads) reads the
+   packets of the next 2–3 stripes ahead. In Drive's "Stream files" mode, this is
+   exactly what triggers the download, in parallel instead of file by file. The
+   SHA-256 is checked along the way (hashlib releases the GIL, so several cores
+   are used).
+   - Data packets are read first. Parity packets are only touched if a data packet
+     is missing or damaged. This saves downloads. ✔
+   - **Timeout per packet:** if there is no progress for 5 min (stuck
+     placeholder), the packet counts as missing for now. If parity is available,
+     work continues with it; otherwise it is retried later.
+4. **Assemble the stripe:** ✔ with k valid data packets they are read directly,
+   otherwise zfec reconstructs the stripe (in 1 MiB slices, little RAM). With
+   fewer than k valid packets, the receiver waits (upload still running / Drive
+   still syncing) and shows "Warte auf Stripe 17 (8/10 Pakete)".
+5. **Write files:** ✔
+   - Every file is written as `.<name>.vtpart` first and `fsync`ed. Only when its
+     **SHA-256 matches** the manifest is it renamed atomically to its real name,
+     and its mtime is set. A half-written or wrong file therefore never appears
+     under its real name.
+   - If the hash is not known yet (sender still running), the file stays as
+     `.vtpart` and is verified and renamed once the final manifest arrives.
+   - Directories (including empty ones) are created; their mtimes are set at the end.
+   - The state file is updated after every finished file.
+6. **Finish:** ✔
+   - Every file in the manifest must be present and verified.
+   - A **receive report** (`VidTransfer-Report.txt`) is written into the restored
+     folder: files, sizes, SHA-256, repaired stripes, duration.
+   - Only then is `<name> (receiving)` renamed to `<name>`.
+   - Then a notification is shown, and **„Im Finder zeigen“** becomes available.
+   - Later, optionally: **„Transfer-Ordner in Drive löschen …“** (with
+     confirmation, never automatic).
 
-### Fortsetzen nach Abbruch
+### Resuming after interruption ✔
 
-- Im Arbeitsordner liegt `.vidtransfer-state.json` mit Transfer-ID, Format-Version
-  und der Liste fertiger, geprüfter Dateien (Pfad, Größe, SHA-256).
-- Beim Neustart werden fertige Dateien kurz geprüft (Größe + mtime, bei
-  Unsicherheit SHA-256) und übersprungen. Das Lesen beginnt beim Stripe der ersten
-  unfertigen Datei. Mit v2 ist das ein direkter Sprung über den Index.
-- `.vtpart`-Reste werden verworfen und neu geschrieben.
+- The working folder contains `.vidtransfer-state.json` with the transfer ID and
+  the finished files (path, size, SHA-256, mtime), both verified ones and
+  written-but-unverified ones (`.vtpart`).
+- On restart, finished files are checked quickly (size + mtime) and skipped. A
+  file that was changed in between is written again. With v1, the stream is still
+  read from the start (CPU only, packets are local by then). With v2, the receiver
+  jumps directly to the first unfinished file via the index.
+- Leftover `.vtpart` files from an interrupted write are overwritten.
+- Tested with a hard-killed process: the resume skips the finished file and the
+  result is byte-identical.
 
-### Teilrettung („Notfall“)
+### Partial recovery ("emergency")
 
-Ist ein Stripe endgültig nicht rettbar (Upload abgeschlossen, weniger als k
-gültige Pakete, Sender nicht mehr verfügbar), gibt es nach Rückfrage
-**„Alles Rettbare wiederherstellen“**:
-- Alle Dateien, deren Stripes intakt sind, werden normal entpackt und geprüft.
-- Die betroffenen Dateien werden im Bericht aufgeführt, mit dem Hinweis, dass der
-  Sender genau diese Stripes neu senden kann. Der Sendelauf ist deterministisch und
-  schreibt nur fehlende Pakete neu.
-- **Optional bei MP4:** Die beschädigte Datei wird mit Nullen an den Lücken als
-  `name.BESCHÄDIGT.mp4` geschrieben, weil Player oft den Rest noch abspielen. Das
-  ist standardmäßig aus.
-- **Ohne Manifest** (alle drei Kopien verloren): Records werden über Magic und CRC
-  gefunden. Ohne Index lässt sich nicht prüfen, ob alles vollständig ist. Das
-  wird klar angezeigt.
+If a stripe is unrecoverable for good (upload complete, fewer than k valid
+packets, sender no longer available), **„Alles Rettbare wiederherstellen“** is
+offered after asking:
+- All files whose stripes are intact are unpacked and verified as usual.
+- The affected files are listed in the report, with the hint that the sender can
+  re-send exactly these stripes. Sending is deterministic and only rewrites
+  missing packets.
+- **Optional for MP4:** the damaged file is written with zeros in the gaps as
+  `name.DAMAGED.mp4`, since players can often still play the rest. This is off by
+  default.
+- **Without manifest** (all three copies lost): records are located via magic and
+  CRC. Without the index, completeness cannot be checked, and this is shown clearly.
 
-### Weitere Funktionen
+### Further features
 
-- `vidtransfer verify <ordner>` bzw. Button **„Nur prüfen“**: lädt und prüft alle
-  Pakete und meldet, ob alles wiederherstellbar ist, ohne zu entpacken. Das ist
-  nützlich, bevor der Sender seine Daten löscht.
-- `vidtransfer list <ordner>`: zeigt Dateiliste und Größen aus dem Index.
-- `vidtransfer receive <ordner> <ziel> --only "Audio/*.wav"`: stellt einzelne
-  Dateien wieder her (lädt nur die nötigen Stripes).
+- `vidtransfer verify <folder>` / button **„Nur prüfen“**: ✔ checks all k+m
+  packets of every stripe, then decodes the whole stream and checks every file
+  hash, without writing anything. It reports intact, repairable-only-with-parity
+  and unrecoverable stripes. This is useful before the sender deletes its data.
+  `--quick` checks packets only.
+- `vidtransfer list <folder>`: shows the file list and sizes from the index.
+- `vidtransfer receive <folder> <dest> --only "Audio/*.wav"`: restores single files
+  (loads only the required stripes).
 
-### Sicherheit und Plattform-Details
+### Safety and platform details
 
-- **Pfade:** keine absoluten Pfade, kein `..`, keine Symlinks/Geräte. Alles bleibt
-  unter dem Zielordner.
-- **Unicode:** Pfade werden auf NFC normalisiert (macOS liefert NFD). Damit
-  stimmen Namen und Hashes plattformübergreifend.
-- **Windows als Ziel** (falls nötig): unzulässige Zeichen (`:*?"<>|`) und
-  reservierte Namen (`CON`, `NUL`, …) werden ersetzt und im Bericht vermerkt.
-  Lange Pfade bekommen das Präfix `\\?\`.
-- **Groß/klein:** APFS und NTFS unterscheiden standardmäßig nicht zwischen Groß-
-  und Kleinschreibung. Kollidieren zwei Pfade, wird umbenannt und gewarnt.
-- **Ruhezustand:** `caffeinate` läuft auch während des Entpackens.
+- **Paths:** ✔ no absolute paths, no `..`, no drive letters, no symlinks/devices,
+  no collisions with internal files. Everything stays below the destination.
+- **Unicode:** paths are normalised to NFC (macOS delivers NFD), so names and
+  hashes match across platforms.
+- **Windows as destination** (if needed): invalid characters (`:*?"<>|`) and
+  reserved names (`CON`, `NUL`, …) are replaced and noted in the report. Long
+  paths get the `\\?\` prefix.
+- **Case:** APFS and NTFS are case-insensitive by default. If two paths collide,
+  one is renamed and a warning is shown.
+- **Sleep:** ✔ `caffeinate` runs as long as the app is open, including while unpacking.
 
-## Robustheit (Senden)
+## Robustness (sending)
 
-- **Sender abgebrochen:** Einfach neu starten. Der Strom ist deterministisch,
-  bereits vorhandene identische Pakete werden übersprungen. Ein erneuter Sendelauf
-  repariert auch kaputte Pakete im Drive.
-- **Manifest während des Uploads:** Wird nach jedem Stripe aktualisiert (Index bis
-  dahin, Status `in_progress`). So kann der Empfänger schon fertige Dateien
-  zuordnen.
-- **Ruhezustand:** Solange die App offen ist, verhindert `caffeinate`, dass der
-  Mac einschläft. Das ist wichtig, damit Drive weiter hochladen kann.
+- **Sender interrupted:** just start again. The stream is deterministic, identical
+  packets already present are skipped. Sending again also repairs damaged packets
+  in Drive (existing packets are fully verified).
+- **Manifest during the upload (v2):** updated after every stripe (index so far,
+  status `in_progress`), so the receiver can already map finished files.
+- **Sleep:** as long as the app is open, `caffeinate` prevents the Mac from going
+  to sleep. This matters so that Drive keeps uploading.
 
-## Tests (Entpacken)
+## Tests (unpacking)
 
-- Roundtrip v1 und v2, leere Dateien und Ordner, Unicode/NFD-Namen, sehr viele kleine Dateien
-- Pro Stripe bis zu m Pakete gelöscht, mit Bitfehlern oder abgeschnitten → identisches Ergebnis
-- m+1 Verluste in einem Stripe → Teilrettung: alle nicht betroffenen Dateien korrekt, Bericht korrekt
-- Abbruch mitten in einer Datei → Fortsetzen überspringt fertige Dateien, `.vtpart` wird neu geschrieben
-- Zu wenig Speicherplatz → klare Meldung, nichts geschrieben
-- Hängendes Paket (simulierter blockierender Read) → Timeout, Parität wird genutzt
-- Bösartige Pfade (`../x`, absolut) → werden abgelehnt
-- Alle Manifeste gelöscht → Notfall-Scan findet alle Records
+- ✔ Roundtrip, empty files and folders, non-ASCII names, compression levels
+- ✔ Up to m packets per stripe deleted, with bit errors or truncated → identical result
+- ✔ m+1 losses in one stripe → clear error; `verify` reports the stripe as unrecoverable
+- ✔ Cancelled receive → resume skips finished files; a file changed in between is rewritten
+- ✔ Hashes unknown while the sender is running → files stay `.vtpart` until the final manifest
+- ✔ Not enough free space → clear message, nothing left behind
+- ✔ Malicious paths (`../x`, absolute, drive letter, internal names) → rejected
+- ✔ Report contains every file and hash; no leftovers (`.vtpart`, state file) after success
+- Hanging packet (simulated blocking read) → timeout, parity is used (phase 6)
+- m+1 losses → partial recovery: all unaffected files correct, report correct (phase 8)
+- All manifests deleted → emergency scan finds all records (phase 8)
+- v1 transfer still readable after the v2 switch (phase 7)
 
-## Umsetzung
+## Implementation
 
-1. ✔ Kern: Paketformat, Erasure Coding, Sender und Empfänger (v1), Tests mit verlorenen und kaputten Paketen
-2. ✔ Drive-Erkennung (`~/Library/CloudStorage/GoogleDrive-*/My Drive`), Konfiguration
-3. ✔ Tk-GUI mit Drag & Drop auf das App-Symbol (`::tk::mac::OpenDocument`), Fortschritt
-4. ✔ PyInstaller-`.app` (arm64 + x86_64) per Build-Skript und GitHub Actions
-5. **Entpacken, Teil 1:** Speicherplatzprüfung, atomares Schreiben pro Datei,
-   Statusdatei + Fortsetzen, Empfangsbericht, `verify`, GUI-Buttons „Nur prüfen“ /
-   „Im Finder zeigen“
-6. **Entpacken, Teil 2:** Prefetch-Pool mit paralleler Prüfung und Timeout
-7. **Container v2:** Record-Format, Kompression pro Datei, Index im Manifest
-   (inkrementell), v1 bleibt lesbar
-8. **Entpacken, Teil 3 (braucht v2):** Sprung beim Fortsetzen, `--only`,
-   Teilrettung, Notfall-Scan ohne Manifest
+1. ✔ Core: packet format, erasure coding, sender and receiver (v1), tests with lost and damaged packets
+2. ✔ Drive detection (`~/Library/CloudStorage/GoogleDrive-*/My Drive`), configuration
+3. ✔ Tk GUI with drag & drop onto the app icon (`::tk::mac::OpenDocument`), progress
+4. ✔ PyInstaller `.app` (arm64 + x86_64) via build script and GitHub Actions
+5. ✔ **Unpacking, part 1:** free-space check, atomic per-file writes, state file +
+   resume, receive report, `verify`, GUI buttons „Nur prüfen“ / „Im Finder zeigen“
+6. **Unpacking, part 2:** prefetch pool with parallel verification and timeout
+7. **Container v2:** record format, per-file compression, index in the manifest
+   (incremental), v1 stays readable
+8. **Unpacking, part 3 (needs v2):** jump on resume, `--only`, `list`, partial
+   recovery, emergency scan without manifest, NFC/Windows name handling
