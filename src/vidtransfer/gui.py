@@ -960,9 +960,15 @@ class SettingsWindow:
         self._path_row(f, 2, "Google-Drive-Ordner", self.drive_var, self._change_drive)
         self.inbox_var = tk.StringVar(value=str(app.inbox()))
         self._path_row(f, 3, "Empfangene Lieferungen in", self.inbox_var, self._change_inbox)
+        checks = ttk.Frame(f)
+        checks.grid(row=4, column=0, columnspan=3, sticky="w", pady=(10, 0))
         self.auto_var = tk.BooleanVar(value=cfg.auto_receive)
-        ttk.Checkbutton(f, text="Im Modus „Empfangen“ neue Lieferungen automatisch empfangen",
-                        variable=self.auto_var).grid(row=4, column=0, columnspan=3, sticky="w", pady=(10, 0))
+        ttk.Checkbutton(checks, text="Im Modus „Empfangen“ neue Lieferungen automatisch empfangen",
+                        variable=self.auto_var).pack(anchor="w")
+        self.login_var = tk.BooleanVar(value=desktop.launch_at_login_enabled())
+        if IS_MAC:
+            ttk.Checkbutton(checks, text="Beim Anmelden automatisch starten",
+                            variable=self.login_var).pack(anchor="w")
 
         ttk.Separator(f).grid(row=5, column=0, columnspan=3, sticky="we", pady=10)
         tools = ttk.Frame(f)
@@ -1040,6 +1046,11 @@ class SettingsWindow:
             return
         changes.update(values)
         self.app.cfg.update(**changes)
+        if IS_MAC and self.login_var.get() != desktop.launch_at_login_enabled():
+            try:
+                desktop.set_launch_at_login(self.login_var.get())
+            except OSError:
+                log.exception("Changing start at login failed")
         self.app._update_watch()
         self.win.destroy()
 

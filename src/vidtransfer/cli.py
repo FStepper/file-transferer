@@ -13,7 +13,7 @@ from vidtransfer.config import Config, setup_logging
 from vidtransfer.drive import find_drive_roots
 from vidtransfer.util import Cancelled, human_bytes
 
-COMMANDS = {"send", "receive", "verify", "status", "list", "gui"}
+COMMANDS = {"send", "receive", "verify", "status", "list", "config", "gui"}
 
 
 def _console_progress():
@@ -122,6 +122,55 @@ def cmd_status(a) -> int:
     return 0 if not bad and man["status"] == "complete" else 2
 
 
+def cmd_config(a) -> int:
+    """Read or change settings without the window (used by the install script)."""
+    from vidtransfer import desktop
+    from vidtransfer.drive import find_drive_locations
+
+    cfg = Config.load()
+    if a.list_drives:
+        for p in find_drive_locations():
+            print(p.as_posix())          # "/" also on Windows, so shell scripts can use it
+        return 0
+    if a.get:
+        value = {
+            "drive": cfg.drive_root or "",
+            "sender": cfg.sender_name or desktop.computer_name(),
+            "inbox": cfg.receive_dir or str(desktop.default_inbox()),
+            "mode": cfg.mode,
+            "login": "on" if desktop.launch_at_login_enabled() else "off",
+        }[a.get]
+        print(value)
+        return 0
+
+    changes: dict = {}
+    if a.drive is not None:
+        drive = Path(a.drive).expanduser()
+        if not drive.is_dir():
+            print(f"Fehler: Ordner nicht gefunden: {drive}", file=sys.stderr)
+            return 1
+        changes["drive_root"] = str(drive)
+    if a.sender is not None:
+        changes["sender_name"] = a.sender.strip() or None
+    if a.inbox is not None:
+        inbox = Path(a.inbox).expanduser()
+        inbox.mkdir(parents=True, exist_ok=True)
+        changes["receive_dir"] = str(inbox)
+    if a.mode is not None:
+        changes["mode"] = a.mode
+    if changes:
+        cfg.update(**changes)
+    if a.login is not None:
+        if desktop.IS_MAC:
+            desktop.set_launch_at_login(a.login == "on")
+        else:
+            print("Hinweis: Start beim Anmelden gibt es nur unter macOS.", file=sys.stderr)
+    if not changes and a.login is None:
+        for key in ("drive_root", "sender_name", "receive_dir", "mode", "auto_receive"):
+            print(f"{key} = {getattr(cfg, key)}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     # Windowed apps (PyInstaller, console=False) may have no stdout/stderr
     if sys.stdout is None:
@@ -177,6 +226,16 @@ def main(argv: list[str] | None = None) -> int:
     st = sub.add_parser("status", help="schneller Überblick über einen Transfer-Ordner (lädt nichts)")
     st.add_argument("folder")
     st.set_defaults(func=cmd_status)
+
+    c = sub.add_parser("config", help="Einstellungen anzeigen oder setzen (z. B. für das Installationsskript)")
+    c.add_argument("--list-drives", action="store_true", help="gefundene Google-Drive-Ordner auflisten")
+    c.add_argument("--get", choices=["drive", "sender", "inbox", "mode", "login"], help="einen Wert ausgeben")
+    c.add_argument("--drive", help="Google-Drive-Ordner für die Lieferungen")
+    c.add_argument("--sender", help="Name dieses Computers (leer = Computername)")
+    c.add_argument("--inbox", help="Ablage für empfangene Lieferungen")
+    c.add_argument("--mode", choices=["send", "receive"], help="Modus beim Start")
+    c.add_argument("--login", choices=["on", "off"], help="beim Anmelden starten (macOS)")
+    c.set_defaults(func=cmd_config)
 
     g = sub.add_parser("gui", help="Fenster öffnen")
     g.add_argument("paths", nargs="*")

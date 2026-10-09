@@ -559,5 +559,20 @@ upload time estimates).
       onto the window still works; the program title was removed from the window
     - found along the way (Windows): replacing a file in the Drive folder while
       it is briefly open elsewhere failed with "access denied"; now retried
-11. **Installation:** install script (quarantine flag, Drive folder, sender name),
-    optional start at login (U15, U16)
+11. ◐ **Installation:** install script (quarantine flag, Drive folder, sender name),
+    optional start at login (U15, U16). Prepared, **not yet tested on a Mac**:
+    - `packaging/VidTransfer installieren.command` (bash 3.2 compatible) copies
+      the app to /Applications (sudo only if needed), quits a running copy,
+      removes the quarantine flag and asks for Drive folder (lists Drive folders
+      and shared drives, suggests a subfolder), name, mode, inbox and start at login
+    - all settings go through the new `vidtransfer config` command, so the logic is
+      in tested Python code; the script only asks and calls it
+    - start at login: LaunchAgent `app.vidtransfer.VidTransfer.login` (takes effect
+      at the next login); also a checkbox in the settings window on macOS
+    - `build_mac.sh` ships a folder with the app, the script and `README-INSTALL.txt`
+    - tested on Windows: dry run (`VT_DRY_RUN=1`) of the whole dialogue with Git
+      Bash, shellcheck clean; on GitHub's macOS runner the same tests run with the
+      system bash 3.2. Found and fixed: endless loop at end of input, carriage
+      returns in answers and in the app's output
+    - still to check on a real Mac: Gatekeeper behaviour of the script, sudo
+      prompt, LaunchAgent at login, permission prompts for Google Drive

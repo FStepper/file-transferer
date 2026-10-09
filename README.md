@@ -135,16 +135,31 @@ The overhead is `m / k` = 30 %. You can change these settings in
 
 Prebuilt app: `VidTransfer-macOS-arm64.zip` (Apple Silicon: M1/M2/…) or
 `VidTransfer-macOS-x86_64.zip` (Intel; also runs on Apple Silicon via Rosetta).
-Unzip it and drag `VidTransfer.app` into **Applications**.
+The ZIP contains a folder with `VidTransfer.app`, the install script
+`VidTransfer installieren.command` and `README-INSTALL.txt`.
 
-The app is not notarized by Apple, so open it the first time via **right-click → Open**.
-If macOS says the app "is damaged", run this once in Terminal:
+Once per Mac, double-click **`VidTransfer installieren.command`**. The script:
+- copies the app to **Applications** (asks for an admin password if needed),
+- removes the macOS block on the app (it is not notarized by Apple),
+- asks for the Google Drive folder (same folder on every Mac; lists the Drive
+  folders it finds, including shared drives, and suggests a subfolder
+  `VidTransfer`), this Mac's name, whether the Mac mainly sends or receives, the
+  inbox (receiving Macs) and whether VidTransfer should start at login.
+
+Because the script itself is not notarized either, macOS blocks it the first
+time: right-click → **Open**, or on macOS 15 and later **System Settings ›
+Privacy & Security › Open Anyway**. Alternatively, run it in Terminal:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/VidTransfer.app
+bash "VidTransfer installieren.command"
 ```
 
-The first time the app accesses Google Drive or Downloads, macOS asks for
+All answers can be changed later in the app's settings. The script stores them
+through the app's own command line (`VidTransfer config …`), so it never edits
+settings files itself. Details, including how to set up a shared Drive folder for
+different Google accounts: `packaging/README-INSTALL.txt`.
+
+The first time the app accesses Google Drive, Movies or Downloads, macOS asks for
 permission. Please allow it.
 
 ## Building the app
@@ -161,7 +176,16 @@ The Intel version can also be built on the M2 (runs via Rosetta):
 ./packaging/build_mac.sh x86_64
 ```
 
-Result: `dist/<arch>/VidTransfer.app` and `dist/VidTransfer-macOS-<arch>.zip`.
+Result: `dist/<arch>/VidTransfer.app` and `dist/VidTransfer-macOS-<arch>.zip`
+(folder with the app, the install script and `README-INSTALL.txt`).
+
+The install script can be tried without a Mac (it then only prints the macOS
+commands):
+
+```bash
+VT_DRY_RUN=1 VT_SRC_APP=<any folder> VT_DEST_DIR=<folder> VT_APP_BIN="python -m vidtransfer" \
+  bash "packaging/VidTransfer installieren.command"
+```
 Alternatively, the GitHub workflow `build-macos` builds both variants (start it
 manually or push a `v*` tag).
 
@@ -177,6 +201,9 @@ $VT receive "<Drive folder>" ~/Downloads    # resumes automatically if interrupt
 $VT receive "<Drive folder>" ~/Downloads --only "Audio/*.wav" --only "clip01.mp4"
 $VT receive "<Drive folder>" ~/Downloads --salvage            # restore everything that is left
 $VT receive "<Drive folder>" ~/Downloads --without-manifest   # emergency: packets only
+$VT config                                  # show the settings
+$VT config --list-drives                    # Google Drive folders found (incl. shared drives)
+$VT config --drive "<folder>" --sender "Kamera-Mac" --mode receive --login on
 ```
 
 `--only` matches the path or the file name (wildcards allowed, not

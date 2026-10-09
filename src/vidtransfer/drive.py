@@ -41,6 +41,32 @@ def find_drive_roots() -> list[Path]:
     return unique
 
 
+SHARED_DRIVE_NAMES = ("Shared drives", "Geteilte Ablagen")
+
+
+def find_drive_locations() -> list[Path]:
+    """Places a delivery folder can live in: every "My Drive" plus every shared drive.
+
+    Used by the install script to offer a choice. Shared drives sit next to
+    "My Drive" (macOS: in the account folder; Windows: on the Drive letter).
+    """
+    out = find_drive_roots()
+    for root in list(out):
+        for name in SHARED_DRIVE_NAMES:
+            shared = root.parent / name
+            try:
+                if shared.is_dir():
+                    out += sorted(p for p in shared.iterdir() if p.is_dir() and not p.name.startswith("."))
+            except OSError:
+                pass
+    seen, unique = set(), []
+    for p in out:
+        if p not in seen:
+            seen.add(p)
+            unique.append(p)
+    return unique
+
+
 def default_cloudstorage_dir() -> Path:
     cloud = Path.home() / "Library" / "CloudStorage"
     return cloud if cloud.is_dir() else Path.home()

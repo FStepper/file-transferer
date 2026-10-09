@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import plistlib
 import socket
 import subprocess
 import sys
@@ -121,6 +122,56 @@ class KeepAwake:
     @property
     def active(self) -> bool:
         return self._proc is not None
+
+
+# ---------------------------------------------------------------- start at login (macOS)
+
+LOGIN_LABEL = "app.vidtransfer.VidTransfer.login"
+DEFAULT_APP = Path("/Applications/VidTransfer.app")
+
+
+def app_bundle() -> Optional[Path]:
+    """The running .app bundle (…/VidTransfer.app), if started from one."""
+    exe = Path(sys.executable)
+    if getattr(sys, "frozen", False) and len(exe.parents) > 2 and exe.parents[2].suffix == ".app":
+        return exe.parents[2]
+    return None
+
+
+def login_item_path(home: Optional[Path] = None) -> Path:
+    return (home or Path.home()) / "Library" / "LaunchAgents" / f"{LOGIN_LABEL}.plist"
+
+
+def login_item_plist(app: Path) -> bytes:
+    """A LaunchAgent that opens the app once when the user logs in."""
+    return plistlib.dumps({
+        "Label": LOGIN_LABEL,
+        "ProgramArguments": ["/usr/bin/open", "-a", str(app)],
+        "RunAtLoad": True,
+        "ProcessType": "Interactive",
+    })
+
+
+def launch_at_login_enabled(home: Optional[Path] = None) -> bool:
+    return login_item_path(home).exists()
+
+
+def set_launch_at_login(enabled: bool, app: Optional[Path] = None, home: Optional[Path] = None) -> None:
+    """Install or remove the LaunchAgent. It takes effect at the next login, so the
+    app is not started a second time now."""
+    path = login_item_path(home)
+    if enabled:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(login_item_plist(app or app_bundle() or DEFAULT_APP))
+        log.info("Start at login enabled (%s)", path)
+        return
+    if path.exists():
+        path.unlink()
+        log.info("Start at login disabled")
+    if IS_MAC and home is None:
+        # Unload it if it was loaded at login; harmless if it was not
+        subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{LOGIN_LABEL}"],
+                       capture_output=True, check=False)
 
 
 def enable_drop(root) -> bool:

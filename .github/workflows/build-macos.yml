@@ -19,7 +19,11 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -e ".[dev]"
+      # On macOS this also runs the install script (dry run) with the system bash 3.2
       - run: python -m pytest -q
+      - name: Lint shell scripts
+        if: runner.os == 'macOS'
+        run: shellcheck --shell=bash -S warning "packaging/VidTransfer installieren.command" packaging/build_mac.sh
 
   build:
     needs: test

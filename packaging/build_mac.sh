@@ -40,11 +40,20 @@ APP="dist/$TARGET_ARCH/VidTransfer.app"
 echo "==> App self-test"
 run "$APP/Contents/MacOS/VidTransfer" --version
 
+echo "==> Package (app + install script + instructions)"
+PKG="dist/$TARGET_ARCH/VidTransfer"
+rm -rf "$PKG"
+mkdir -p "$PKG"
+ditto "$APP" "$PKG/VidTransfer.app"
+cp "packaging/VidTransfer installieren.command" "$PKG/"
+chmod +x "$PKG/VidTransfer installieren.command"
+cp packaging/README-INSTALL.txt "$PKG/"
+
 ZIP="dist/VidTransfer-macOS-$TARGET_ARCH.zip"
 rm -f "$ZIP"
-ditto -c -k --keepParent "$APP" "$ZIP"
+ditto -c -k --keepParent "$PKG" "$ZIP"
 echo
 echo "Done:"
 echo "  $APP"
-echo "  $ZIP"
-echo "Install: drag VidTransfer.app into /Applications and open it once via right-click -> Open."
+echo "  $ZIP  (folder VidTransfer with the app, the install script and README-INSTALL.txt)"
+echo "Install: unzip, then double-click 'VidTransfer installieren.command' (see README-INSTALL.txt)."
