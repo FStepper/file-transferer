@@ -26,12 +26,14 @@ Receiver:  read index → prefetch + verify packets (in parallel) → reconstruc
            missing/damaged ones from parity → records → files (atomic) + SHA-256
 ```
 
-(Implemented today: format v1 = one zstd-compressed tar stream; see below.)
+(Transfers created before phase 7 use format v1, a zstd-compressed tar stream;
+they remain readable.)
 
-- **Per-file compression (v2):** MP4/MOV/MXF are stored raw, since they hardly
-  compress any further. WAV/AIFF and everything else use zstd level 3, but only if
-  a sample (first 4 MiB) saves at least 3 %. zstd is fast enough never to be the
-  bottleneck.
+- **Per-file compression:** ✔ video, audio-codec, image and archive formats
+  (MP4/MOV/MXF/BRAW/…, MP3/AAC/FLAC, JPEG/HEIC/RAW, ZIP/…) are stored raw, since
+  they hardly compress any further. WAV/AIFF and everything else use zstd level 3,
+  but only if a sample (first 4 MiB) saves at least 3 %. zstd is fast enough never
+  to be the bottleneck (benchmark: 1.5 GB in ~10 s including parity).
 - **Fault tolerance:** the default is k = 10 and m = 3 with 32 MiB per packet.
   *Any* 10 of a stripe's 13 packets fully restore the stripe. The overhead is 30 %.
 - **Packet format (`sNNNNNN_II.vtp`):** 80-byte header (magic, version, k, m,
@@ -43,40 +45,59 @@ Receiver:  read index → prefetch + verify packets (in parallel) → reconstruc
 - **Memory/disk:** only one stripe is buffered locally at a time (≈ 0.8 GB). Only
   finished packets go into Drive (temporary file + atomic rename).
 
-## Container format v2 (foundation for good unpacking)
+## Container format v2 ✔ (foundation for good unpacking)
 
 v1 is a single zstd-compressed tar stream. That is simple, but it has a weakness:
 everything **after** an unrecoverable spot is lost, and there is no way to jump
-straight to one file. v2 replaces tar + whole-stream zstd with a simple container
-of its own:
+straight to one file. v2 (`container.py`, the default since phase 7) replaces
+tar + whole-stream zstd with a simple container of its own:
 
 ```
 stream = record | record | … | end record
 
-record = [record header][data]
-  record header (fixed + variable part, with CRC32):
-    magic "VTRC", version, type (file/dir/end), flags (raw|zstd),
-    path (UTF-8, NFC), original size, stored size, mtime, mode,
-    SHA-256 of the original, CRC32 over the header
-  data: original bytes or exactly one zstd frame
+record header (30 bytes fixed + path, CRC32-protected):
+  magic "VTRC", version, type (file/dir/end), flags (raw|zstd), reserved,
+  original size (u64), mtime (i64), mode (u32), path length (u16), path (UTF-8)
+file data:
+  raw:  exactly <original size> bytes
+  zstd: chunks of [u32 length][zstd frame of ≤ 4 MiB original data], ended by u32 0
+file trailer (48 bytes, CRC32-protected):
+  magic "VTRE", SHA-256 of the original data, stored data size (u64)
 ```
 
+Design decisions:
+- **Hash in a trailer, not the header:** the sender streams every file exactly
+  once; the SHA-256 is only known at the end.
+- **Chunked zstd frames:** the compressed size need not be known in advance (no
+  temporary copy of large WAV files), and damage stays confined to a 4 MiB chunk.
+- **Every file is verified on its own** via its trailer, so the receiver gives
+  each file its real name immediately, without waiting for the final manifest.
+- **Determinism:** same input → same bytes (fixed headers, deterministic
+  compression decisions), so re-sending still skips identical packets.
+- **Source changes:** if a file grows or shrinks while it is being sent, sending
+  stops with a clear error (`SourceChangedError`) instead of producing a broken record.
+
 In addition, the manifest contains an **index**: for every file its path, size,
-SHA-256, mtime and compression, plus its **offset and length in the stream**. This
-directly tells which stripes a file occupies.
+mtime, SHA-256 and compression, plus its **offset and length in the stream**
+(directories: path, mtime, offset). All stripes except the last are exactly
+k × block_size bytes long, so the index directly tells which stripes a file
+occupies. While sending, the manifest is rewritten after every stripe, so the
+index grows as files are finished.
 
 What this enables:
 
 | Capability | v1 (tar+zstd) | v2 |
 |---|---|---|
-| Unpack while the upload is running (streaming) | ✔ | ✔ (record headers are self-describing) |
-| Resume after interruption | ✔ (finished files skipped, but the stream is re-read from the start) | ✔ (jump straight to the offset) |
-| Restore single files | ✖ | ✔ (only the required stripes are loaded) |
-| Partial recovery if a stripe is lost for good | ✖ (rest is lost) | ✔ (only affected files are missing) |
-| Unpack without manifest (emergency) | limited | ✔ (resync via magic + CRC) |
+| Unpack while the upload is running (streaming) | ✔ | ✔ (records are self-describing) |
+| Verify a file before the final manifest exists | ✖ (stays `.vtpart`) | ✔ (trailer hash) |
+| Resume after interruption | ✔ (finished files skipped, but the stream is re-read from the start) | ✔ (jumps straight to the first unfinished file; earlier stripes are never loaded) |
+| Restore single files (phase 8) | ✖ | possible (only the required stripes are loaded) |
+| Partial recovery if a stripe is lost for good (phase 8) | ✖ (rest is lost) | possible (only affected files are missing) |
+| Unpack without manifest (emergency, phase 8) | limited | possible (resync via magic + CRC) |
 
 v1 transfers remain readable. The receiver detects the format via
-`manifest.format_version`.
+`manifest.format_version`. A v1 writer is kept (`SendOptions(format_version=1)`)
+so that every end-to-end test runs for both formats.
 
 ## Unpacking
 
@@ -122,12 +143,14 @@ v1 transfers remain readable. The receiver detects the format via
    still syncing) and shows "Warte auf Stripe 17 (8/10 Pakete)".
 5. **Write files:** ✔
    - Every file is written as `.<name>.vtpart` first and `fsync`ed. Only when its
-     **SHA-256 matches** the manifest is it renamed atomically to its real name,
-     and its mtime is set. A half-written or wrong file therefore never appears
-     under its real name.
-   - If the hash is not known yet (sender still running), the file stays as
-     `.vtpart` and is verified and renamed once the final manifest arrives.
-   - Directories (including empty ones) are created; their mtimes are set at the end.
+     **SHA-256 matches** is it renamed atomically to its real name, and its mtime
+     is set. A half-written or wrong file therefore never appears under its real
+     name. v2: the hash comes from the record trailer (and is cross-checked with
+     the manifest index if it is already there), so the rename happens right away.
+   - v1 only: if the hash is not known yet (sender still running), the file stays
+     as `.vtpart` and is verified and renamed once the final manifest arrives.
+   - Directories (including empty ones) are created; their mtimes are set at the
+     end (v2: from the manifest, since skipped directory records are not read).
    - The state file is updated after every finished file.
 6. **Finish:** ✔
    - Every file in the manifest must be present and verified.
@@ -145,8 +168,9 @@ v1 transfers remain readable. The receiver detects the format via
   written-but-unverified ones (`.vtpart`).
 - On restart, finished files are checked quickly (size + mtime) and skipped. A
   file that was changed in between is written again. With v1, the stream is still
-  read from the start (CPU only, packets are local by then). With v2, the receiver
-  jumps directly to the first unfinished file via the index.
+  read from the start (CPU only, packets are local by then). ✔ With v2, the
+  receiver jumps directly to the first unfinished file via the index; the stripes
+  before it are never loaded or downloaded.
 - Leftover `.vtpart` files from an interrupted write are overwritten.
 - Tested with a hard-killed process: the resume skips the finished file and the
   result is byte-identical.
@@ -195,8 +219,10 @@ offered after asking:
 - **Sender interrupted:** just start again. The stream is deterministic, identical
   packets already present are skipped. Sending again also repairs damaged packets
   in Drive (existing packets are fully verified).
-- **Manifest during the upload (v2):** updated after every stripe (index so far,
-  status `in_progress`), so the receiver can already map finished files.
+- **Manifest during the upload:** ✔ updated after every stripe (index so far,
+  packet hashes, status `in_progress`), so the receiver can already map finished
+  files. A completed manifest is never downgraded when the same folder is re-sent.
+- **Source changed while sending:** ✔ clear error instead of a broken record.
 - **Sleep:** as long as the app is open, `caffeinate` prevents the Mac from going
   to sleep. This matters so that Drive keeps uploading.
 
@@ -206,7 +232,8 @@ offered after asking:
 - ✔ Up to m packets per stripe deleted, with bit errors or truncated → identical result
 - ✔ m+1 losses in one stripe → clear error; `verify` reports the stripe as unrecoverable
 - ✔ Cancelled receive → resume skips finished files; a file changed in between is rewritten
-- ✔ Hashes unknown while the sender is running → files stay `.vtpart` until the final manifest
+- ✔ Hashes unknown while the sender is running → v1: files stay `.vtpart` until the
+  final manifest; v2: files are verified via their trailer and renamed immediately
 - ✔ Not enough free space → clear message, nothing left behind
 - ✔ Malicious paths (`../x`, absolute, drive letter, internal names) → rejected
 - ✔ Report contains every file and hash; no leftovers (`.vtpart`, state file) after success
@@ -216,9 +243,13 @@ offered after asking:
 - ✔ Transient read errors (packet fails once) → re-read succeeds, also in `verify`
 - ✔ Misread stream → `TransferError`, the next receive resumes and succeeds
 - ✔ `verify` hashes every packet only once; changed packets are checked again
+- ✔ Every end-to-end test runs for v2 and v1 (v1 transfers stay readable)
+- ✔ v2: per-file compression decisions; index offsets point at the right records;
+  manifest index grows while sending; resume never touches stripes before the
+  first unfinished file; growing source file detected; damaged record header or
+  file data detected (CRC / trailer)
 - m+1 losses → partial recovery: all unaffected files correct, report correct (phase 8)
 - All manifests deleted → emergency scan finds all records (phase 8)
-- v1 transfer still readable after the v2 switch (phase 7)
 
 ## Implementation
 
@@ -230,7 +261,7 @@ offered after asking:
    resume, receive report, `verify`, GUI buttons „Nur prüfen“ / „Im Finder zeigen“
 6. ✔ **Unpacking, part 2:** prefetch pool with parallel verification, stall
    timeout, result cache, re-read on failure
-7. **Container v2:** record format, per-file compression, index in the manifest
-   (incremental), v1 stays readable
-8. **Unpacking, part 3 (needs v2):** jump on resume, `--only`, `list`, partial
-   recovery, emergency scan without manifest, NFC/Windows name handling
+7. ✔ **Container v2:** record format, per-file compression, index in the manifest
+   (incremental), jump on resume, v1 stays readable
+8. **Unpacking, part 3:** `--only`, `list`, partial recovery, emergency scan
+   without manifest, NFC/Windows name handling

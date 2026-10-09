@@ -33,7 +33,10 @@ How unpacking stays safe:
   name once its SHA-256 matches. A half-written or corrupt file never appears under
   its real name.
 - **Interrupted?** (cancelled, crash, Mac switched off) Start receiving again and
-  pick the same destination. Finished files are skipped, the rest is completed.
+  pick the same destination. The app jumps straight to the first unfinished file;
+  finished files and the packets before it are not read again.
+- Every file is verified as soon as it is complete, even while the sender is
+  still uploading.
 - Before anything is written, the app checks that there is **enough free space**.
 - Packets are downloaded and verified **in parallel**, a few stripes ahead of the
   one being unpacked. A packet that hangs (e.g. a Drive placeholder that does not
@@ -58,7 +61,11 @@ completely recoverable. This is useful before the sender deletes the original da
 | `k` | 10 | data packets per stripe |
 | `m` | 3 | parity packets per stripe: up to 3 of 13 packets may be missing or damaged |
 | `block_mib` | 32 | packet size in MiB |
-| `zstd_level` | 3 | compression (hardly helps for MP4, a few percent for WAV; 0 = off) |
+| `zstd_level` | 3 | compression level; 0 = off |
+
+Compression is decided per file: video and other already compressed formats
+(MP4, MOV, MXF, BRAW, JPEG, …) are stored as they are; everything else (e.g. WAV)
+is compressed only if a sample shrinks by at least 3 %.
 
 The overhead is `m / k` = 30 %. You can change these settings in
 `~/Library/Application Support/VidTransfer/config.json`. The log is in
