@@ -17,8 +17,8 @@ VidTransfer – installation on a Mac (once per Mac)
 
 3. The script copies the app to Applications, removes the macOS block on the app
    and asks four questions:
-     - Google Drive folder for the deliveries – the same folder on every Mac
-       (see "Shared folder" below)
+     - cloud folder for the deliveries (default: Google Drive) – the same
+       folder on every Mac (see "Shared folder" below)
      - name of this Mac (shown to the receiver)
      - whether this Mac mainly sends or receives
      - whether VidTransfer should start at login (recommended on the receiving Mac)

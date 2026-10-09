@@ -55,7 +55,7 @@ def verify_summary(res: VerifyResult) -> str:
         lines.append(f"{len(res.bad_packets)} fehlende/defekte Paket(e): {shown}")
     if res.unrecoverable:
         shown = ", ".join(str(s + 1) for s in res.unrecoverable[:15])
-        lines.append(f"Betroffene Stripes: {shown}. Abhilfe: Drive fertig synchronisieren lassen oder "
+        lines.append(f"Betroffene Stripes: {shown}. Abhilfe: die Cloud fertig synchronisieren lassen oder "
                      "auf dem Sender denselben Ordner erneut senden (schreibt nur fehlende Pakete).")
     for err in res.content_errors[:10]:
         lines.append(f"  {err}")

@@ -1,7 +1,8 @@
 # VidTransfer
 
-Transfers large folders (MP4, WAV, …) reliably via **Google Drive for desktop**,
-even over an unstable connection. The folder is split into packets with
+Transfers large folders (MP4, WAV, …) reliably via a synced **cloud folder** –
+by default **Google Drive for desktop**, which the app finds by itself – even over
+an unstable connection. The folder is split into packets with
 Reed-Solomon parity. If packets go missing or arrive damaged, the receiver
 reconstructs them automatically, and every file is verified with SHA-256 at the end.
 
@@ -12,7 +13,7 @@ reconstructs them automatically, and every file is verified with SHA-256 at the 
 The window has a switch at the top: **Senden | Empfangen**. The app remembers the
 last mode. Each mode shows one drop zone and the list of deliveries; every
 delivery has one status line and at most one button. Everything else is in
-**Einstellungen** (computer name, Google Drive folder, inbox, verifying a
+**Einstellungen** (computer name, cloud folder, inbox, verifying a
 delivery, log, advanced parameters).
 
 **Sending**
@@ -20,16 +21,16 @@ delivery, log, advanced parameters).
    icon in the Dock – or click **„Ordner auswählen …“**. Loose files can be
    dropped too; they become one delivery called `Files <date>`.
 2. The card shows *Wird vorbereitet – 45 % · noch ca. 6 Min.*
-3. When it says **✔ Liegt in Google Drive**, the app's job is done. Google Drive
-   then uploads in the background – the Mac should stay online until Google Drive
-   shows it as synced. The app keeps the Mac awake only while it is preparing.
+3. When it says **✔ Liegt in der Cloud**, the app's job is done. The cloud client
+   (Google Drive) then uploads in the background – the Mac should stay online until
+   it shows the folder as synced. The app keeps the Mac awake only while it is preparing.
 
 Something went wrong (crash, restart, folder changed)? Click **Fortsetzen** or
 **Erneut senden** on the card, or drop the same folder again. Existing packets are
 skipped and damaged ones replaced.
 
 **Receiving**
-1. Switch to **Empfangen** – that is all. The app watches the Google Drive folder
+1. Switch to **Empfangen** – that is all. The app watches the cloud folder
    and receives every new delivery **automatically** into the inbox, by default
    `~/Movies/VidTransfer` (changeable in the settings). The card shows who sent it.
 2. While the sender is still uploading, the card says *Wird noch hochgeladen
@@ -37,19 +38,19 @@ skipped and damaged ones replaced.
 3. The app verifies the packets, repairs missing ones, unpacks everything and
    verifies every file.
 4. **✔ Angekommen** – **„Im Finder zeigen“** opens the folder. The link
-   **„Platz in Google Drive freigeben“** deletes the delivery from Google Drive
+   **„Platz in der Cloud freigeben“** deletes the delivery from the cloud folder
    (after asking; the received files stay). Google Drive frees the space once its
    trash is emptied.
 
-Deliveries that were already in Google Drive before automatic receiving was used
+Deliveries that were already in the cloud folder before automatic receiving was used
 for the first time, and deliveries sent from this computer, are not fetched
 unasked – they appear as cards with a button **„Empfangen“**. A delivery can also
 be opened by hand with **„Lieferung öffnen …“** or by dragging it onto the window.
 Automatic receiving can be switched off in the settings.
 
 Problems are shown in one plain sentence with one button that helps, e.g.
-*„Der Google-Drive-Ordner ist nicht erreichbar. Läuft Google Drive?“* →
-**Google Drive öffnen**, or *„Auf diesem Computer fehlen 35 GB Speicherplatz.“* →
+*„Der Cloud-Ordner ist nicht erreichbar. Läuft die Cloud-App?“* →
+**Cloud-App starten** (starts Google Drive on the Mac), or *„Auf diesem Computer fehlen 35 GB Speicherplatz.“* →
 **Anderen Speicherort wählen**. The technical details are behind „Details“
 (or right-click on a card).
 
@@ -93,10 +94,11 @@ whether the delivery is completely recoverable.
 > read. That works, but it is slower. You can mark the delivery folder as
 > "Available offline" in Drive.
 
-## Testing locally without Google Drive
+## Other clouds, or testing locally without Google Drive
 
-The target for sending does not have to be Google Drive: in **Einstellungen**,
-click **„Ändern …“** next to „Senden nach (Google Drive)“ and choose any local
+The cloud folder defaults to the Google Drive folder found on the computer, but it
+can be any folder – another sync client's folder, or a local one for testing: in
+**Einstellungen**, click **„Ändern …“** next to „Cloud-Ordner“ and choose any local
 folder, e.g. `D:\VidTransfer-Test`. The app keeps that choice and never switches
 back to the Drive folder by itself. Sending writes the delivery folder there. In
 mode „Empfangen“ the app watches the same folder; deliveries sent from this
@@ -141,7 +143,7 @@ The ZIP contains a folder with `VidTransfer.app`, the install script
 Once per Mac, double-click **`Install VidTransfer.command`**. The script:
 - copies the app to **Applications** (asks for an admin password if needed),
 - removes the macOS block on the app (it is not notarized by Apple),
-- asks for the Google Drive folder (same folder on every Mac; lists the Drive
+- asks for the cloud folder (same folder on every Mac; lists the Google Drive
   folders it finds, including shared drives, and suggests a subfolder
   `VidTransfer`), this Mac's name, whether the Mac mainly sends or receives, the
   inbox (receiving Macs) and whether VidTransfer should start at login.

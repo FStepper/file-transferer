@@ -60,6 +60,6 @@ if sys.platform == "darwin":
         "NSDownloadsFolderUsageDescription": "VidTransfer speichert empfangene Ordner.",
         "NSRemovableVolumesUsageDescription": "VidTransfer liest Video-Ordner von externen Laufwerken.",
         "NSNetworkVolumesUsageDescription": "VidTransfer liest Video-Ordner von Netzlaufwerken.",
-        "NSFileProviderDomainUsageDescription": "VidTransfer legt die Pakete in Google Drive ab und liest sie dort.",
+        "NSFileProviderDomainUsageDescription": "VidTransfer legt die Pakete im Cloud-Ordner ab und liest sie dort.",
     },
 )

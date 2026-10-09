@@ -302,7 +302,7 @@ class _StripeStream:
                     log.warning("Stripe %d still has only %d/%d valid packets after %.0f s - giving up",
                                 s, len(valid), self.k, GIVE_UP_SECONDS)
                     raise StripeUnavailableError(s, len(valid), self.k, True)
-                hint = ("Upload abgeschlossen, aber Pakete fehlen/sind defekt – Drive synchronisiert "
+                hint = ("Upload abgeschlossen, aber Pakete fehlen/sind defekt – die Cloud synchronisiert "
                         "evtl. noch. Notfalls auf dem Sender denselben Ordner erneut senden (repariert).")
             else:
                 stuck_since = None

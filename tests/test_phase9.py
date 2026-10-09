@@ -75,7 +75,7 @@ def test_window_sends_and_receives(tmp_path, monkeypatch):
         sent = app.history.of_kind("send")[0]
         assert wait_for(root, lambda: sent.state == DONE), sent.message
         assert Path(sent.result) == drive / "Drehtag 3"
-        assert "Liegt in Google Drive" in app._card(sent).status.cget("text")
+        assert "Liegt in der Cloud" in app._card(sent).status.cget("text")
 
         app.handle_paths([sent.result])                 # the receiving side drops the delivery
         assert app.mode_var.get() == "receive"

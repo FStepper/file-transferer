@@ -43,9 +43,9 @@ IS_MAC, IS_WIN = desktop.IS_MAC, desktop.IS_WIN
 SEND, RECEIVE, VERIFY = "send", "receive", "verify"
 SCAN_SECONDS = 20
 
-SENT_HINT = "Google Drive lädt jetzt im Hintergrund hoch – bitte online bleiben, bis Google Drive fertig ist."
-DELETED_HINT = ("In Google Drive gelöscht. Der Platz wird frei, sobald der Papierkorb von "
-                "Google Drive geleert ist.")
+SENT_HINT = "Die Cloud-App lädt jetzt im Hintergrund hoch – bitte online bleiben, bis sie fertig ist."
+DELETED_HINT = ("In der Cloud gelöscht. Der Platz wird frei, sobald der Papierkorb der "
+                "Cloud geleert ist.")
 
 
 def _existing_dir(raw: Optional[str]) -> Optional[Path]:
@@ -145,7 +145,7 @@ class Card(ttk.Frame):
         self.title.configure(text=d.name)
         self.meta.configure(text=self._meta_text())
         if d.state == DONE:
-            text = ("✔ Liegt in Google Drive" if d.kind == SEND else "✔ Angekommen") + \
+            text = ("✔ Liegt in der Cloud" if d.kind == SEND else "✔ Angekommen") + \
                    (f" · {when(d.finished)}" if d.finished else "")
         elif d.state == PAUSED:
             text = "⏸ " + d.message
@@ -182,8 +182,8 @@ class Card(ttk.Frame):
         if d.state in (FAILED, INCOMPLETE) and d.details:
             return "Details"
         if self.app.can_free_drive(d):
-            return f"Platz in Google Drive freigeben ({human_bytes(d.size)})" if d.size else \
-                "Platz in Google Drive freigeben"
+            return f"Platz in der Cloud freigeben ({human_bytes(d.size)})" if d.size else \
+                "Platz in der Cloud freigeben"
         return ""
 
     def _on_link(self, _event) -> None:
@@ -431,7 +431,7 @@ class App:
         if not self.cfg.auto_receive:
             self.recv_status.configure(text="Automatisches Empfangen ist ausgeschaltet (Einstellungen).")
         elif drive is None:
-            self.recv_status.configure(text="Bitte zuerst den Google-Drive-Ordner wählen, damit neue "
+            self.recv_status.configure(text="Bitte zuerst den Cloud-Ordner wählen, damit neue "
                                             "Lieferungen automatisch empfangen werden.")
         else:
             self.recv_status.configure(text="Neue Lieferungen werden automatisch empfangen.")
@@ -486,13 +486,13 @@ class App:
         if not ask and cur and Path(cur).is_dir():
             return Path(cur)
         if not ask and cur:
-            messagebox.showwarning(APP_NAME, f"Der Google-Drive-Ordner ist nicht erreichbar:\n{cur}\n\n"
-                                             "Läuft Google Drive? Sonst bitte den Ordner neu wählen.")
+            messagebox.showwarning(APP_NAME, f"Der Cloud-Ordner ist nicht erreichbar:\n{cur}\n\n"
+                                             "Läuft die Cloud-App? Sonst bitte den Ordner neu wählen.")
         roots = find_drive_roots()
         if not ask and not cur and len(roots) == 1:
             chosen = roots[0]
         else:
-            chosen = self._ask_dir("Google-Drive-Ordner für die Lieferungen wählen",
+            chosen = self._ask_dir("Cloud-Ordner für die Lieferungen wählen",
                                    cur, *(str(r) for r in roots), str(default_cloudstorage_dir()))
             if chosen is None:
                 return None
@@ -509,7 +509,7 @@ class App:
 
     def _pick_delivery(self) -> None:
         self._reload_config()
-        p = self._ask_dir("Lieferung in Google Drive wählen", self.cfg.last_transfer_dir,
+        p = self._ask_dir("Lieferung in der Cloud wählen", self.cfg.last_transfer_dir,
                           self.cfg.drive_root, str(default_cloudstorage_dir()))
         if p:
             self.handle_paths([str(p)])
@@ -565,7 +565,7 @@ class App:
         if man is None:
             if auto or not messagebox.askyesno(APP_NAME, (
                     f"Von „{folder.name}“ fehlt noch die Inhaltsliste.\n\n"
-                    "Meist ist die Lieferung einfach noch nicht ganz in Google Drive angekommen – "
+                    "Meist ist die Lieferung einfach noch nicht ganz in der Cloud angekommen – "
                     "dann bitte etwas warten.\n\nSoll trotzdem versucht werden, die Dateien "
                     "wiederherzustellen (Notfall)?")):
                 return
@@ -650,15 +650,15 @@ class App:
     def free_drive(self, d: Delivery) -> None:
         size = f" ({human_bytes(d.size)})" if d.size else ""
         if not messagebox.askyesno(APP_NAME, (
-                f"„{d.name}“{size} aus Google Drive löschen?\n\n"
-                "Die empfangenen Dateien auf diesem Computer bleiben erhalten. Google Drive gibt "
-                "den Platz frei, sobald auch sein Papierkorb geleert ist.")):
+                f"„{d.name}“{size} aus der Cloud löschen?\n\n"
+                "Die empfangenen Dateien auf diesem Computer bleiben erhalten. Die Cloud gibt "
+                "den Platz frei, sobald auch ihr Papierkorb geleert ist.")):
             return
         try:
             watch.delete_delivery(Path(d.sources[0]), d.transfer_id)
         except (watch.NotADeliveryError, OSError) as exc:
             log.warning("Freeing Drive space failed: %s", exc)
-            messagebox.showwarning(APP_NAME, "Der Ordner in Google Drive enthält auch andere Dateien "
+            messagebox.showwarning(APP_NAME, "Der Ordner in der Cloud enthält auch andere Dateien "
                                              "oder ist nicht erreichbar und wurde deshalb nicht gelöscht.")
             return
         d.options["deleted"] = True
@@ -733,7 +733,7 @@ class App:
                     RECEIVE, f.name, [str(f.folder)], None, state=OFFERED, sender=f.sender, size=f.size,
                     files=f.files, transfer_id=f.transfer_id, action="receive_now",
                     message=("Von diesem Computer gesendet – nicht automatisch empfangen."
-                             if f.transfer_id in own else "Lag schon vorher in Google Drive – noch nicht empfangen.")))
+                             if f.transfer_id in own else "Lag schon vorher in der Cloud – noch nicht empfangen.")))
                 changed = True
                 continue
             log.info("New delivery %s from %s - receiving automatically", f.name, f.sender)
@@ -873,7 +873,7 @@ class App:
             d.result, d.size, d.files = str(result.target), result.source_bytes, len(result.files)
             d.transfer_id = result.transfer_id
             d.hint = SENT_HINT
-            desktop.notify(APP_NAME, f"„{d.name}“ liegt in Google Drive.")
+            desktop.notify(APP_NAME, f"„{d.name}“ liegt in der Cloud.")
         else:
             d.result, d.sender = str(result.dest), result.sender or d.sender
             d.size, d.files = result.bytes or d.size, result.files
@@ -957,7 +957,7 @@ class SettingsWindow:
                   style="Muted.TLabel").grid(row=1, column=1, sticky="w", padx=(12, 0))
 
         self.drive_var = tk.StringVar(value=cfg.drive_root or "(wird beim ersten Senden gesucht)")
-        self._path_row(f, 2, "Google-Drive-Ordner", self.drive_var, self._change_drive)
+        self._path_row(f, 2, "Cloud-Ordner", self.drive_var, self._change_drive)
         self.inbox_var = tk.StringVar(value=str(app.inbox()))
         self._path_row(f, 3, "Empfangene Lieferungen in", self.inbox_var, self._change_inbox)
         checks = ttk.Frame(f)

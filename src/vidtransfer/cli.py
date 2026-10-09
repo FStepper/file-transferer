@@ -39,8 +39,8 @@ def _resolve_drive(arg: str | None) -> Path:
     if len(roots) == 1:
         return roots[0]
     if not roots:
-        raise SystemExit("Google-Drive-Ordner nicht gefunden – bitte mit --drive angeben.")
-    raise SystemExit("Mehrere Drive-Ordner gefunden, bitte mit --drive wählen:\n  "
+        raise SystemExit("Cloud-Ordner (Google Drive) nicht gefunden – bitte mit --drive angeben.")
+    raise SystemExit("Mehrere Cloud-Ordner gefunden, bitte mit --drive wählen:\n  "
                      + "\n  ".join(map(str, roots)))
 
 
@@ -186,14 +186,14 @@ def main(argv: list[str] | None = None) -> int:
         from vidtransfer.gui import run_gui
         return run_gui(argv)
 
-    ap = argparse.ArgumentParser(prog="vidtransfer", description="Fehlertolerante Übertragung über Google Drive")
+    ap = argparse.ArgumentParser(prog="vidtransfer", description="Fehlertolerante Übertragung über die Cloud")
     ap.add_argument("--version", action="version", version=__version__)
     ap.add_argument("-v", "--verbose", action="store_true")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("send", help="Ordner paketieren und in den Drive-Ordner schreiben")
+    s = sub.add_parser("send", help="Ordner paketieren und in den Cloud-Ordner schreiben")
     s.add_argument("source")
-    s.add_argument("--drive", help="Google-Drive-Ordner (Standard: automatisch)")
+    s.add_argument("--drive", help="Cloud-Ordner (Standard: Google Drive, automatisch gefunden)")
     s.add_argument("--k", type=int, help="Datenpakete pro Stripe (Standard 10)")
     s.add_argument("--m", type=int, help="Paritätspakete pro Stripe (Standard 3)")
     s.add_argument("--block-mib", type=int, help="Paketgröße in MiB (Standard 32)")
@@ -228,9 +228,9 @@ def main(argv: list[str] | None = None) -> int:
     st.set_defaults(func=cmd_status)
 
     c = sub.add_parser("config", help="Einstellungen anzeigen oder setzen (z. B. für das Installationsskript)")
-    c.add_argument("--list-drives", action="store_true", help="gefundene Google-Drive-Ordner auflisten")
+    c.add_argument("--list-drives", action="store_true", help="gefundene Cloud-Ordner (Google Drive) auflisten")
     c.add_argument("--get", choices=["drive", "sender", "inbox", "mode", "login"], help="einen Wert ausgeben")
-    c.add_argument("--drive", help="Google-Drive-Ordner für die Lieferungen")
+    c.add_argument("--drive", help="Cloud-Ordner für die Lieferungen")
     c.add_argument("--sender", help="Name dieses Computers (leer = Computername)")
     c.add_argument("--inbox", help="Ablage für empfangene Lieferungen")
     c.add_argument("--mode", choices=["send", "receive"], help="Modus beim Start")

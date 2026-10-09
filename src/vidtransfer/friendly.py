@@ -24,12 +24,12 @@ ACTIONS = {
     "retry": "Erneut versuchen",
     "resend": "Erneut senden",
     "reveal": "Im Explorer zeigen" if sys.platform == "win32" else "Im Finder zeigen",
-    "open_drive": "Google Drive öffnen",
+    "open_drive": "Cloud-App starten",
     "choose_inbox": "Anderen Speicherort wählen",
     "open_privacy": "Zugriff erlauben …",
     "salvage": "Alles andere jetzt holen",
     "fetch_missing": "Fehlende Dateien holen",
-    "choose_drive": "Google-Drive-Ordner wählen …",
+    "choose_drive": "Cloud-Ordner wählen …",
     "receive_now": "Empfangen",
 }
 
@@ -97,7 +97,7 @@ def running_text(kind: str, done: int, total: int, msg: str, eta: Eta,
     if kind == "receive" and msg.startswith("Warte"):
         if incoming is not None and incoming < 100:
             return f"Wird noch hochgeladen ({incoming} %) – wird empfangen, sobald es da ist …"
-        return "Wartet auf Google Drive – die Lieferung ist noch nicht vollständig da …"
+        return "Wartet auf die Cloud – die Lieferung ist noch nicht vollständig da …"
     verb = "Wird vorbereitet" if kind == "send" else "Wird empfangen"
     if total <= 0:
         return f"{verb} …"
@@ -131,7 +131,7 @@ def explain(exc: BaseException, kind: str) -> Explanation:
     if isinstance(exc, Cancelled):
         return e("Pausiert.", "resume")
     if isinstance(exc, DriveFolderMissingError):
-        return e("Der Google-Drive-Ordner ist nicht erreichbar. Läuft Google Drive?", "open_drive")
+        return e("Der Cloud-Ordner ist nicht erreichbar. Läuft die Cloud-App?", "open_drive")
     if isinstance(exc, SourceMissingError):
         return e("Der Ordner bzw. die Datei ist nicht mehr da – wurde etwas verschoben "
                  "oder ein Laufwerk getrennt?", "retry")
@@ -142,15 +142,15 @@ def explain(exc: BaseException, kind: str) -> Explanation:
         return e(f"Auf diesem Computer fehlen {human_bytes(missing)} Speicherplatz.", "choose_inbox")
     if isinstance(exc, StripeUnavailableError):
         if exc.upload_complete:
-            return e("Ein Teil der Lieferung fehlt in Google Drive.", "salvage")
-        return e("Die Lieferung ist noch nicht vollständig in Google Drive.", "retry")
+            return e("Ein Teil der Lieferung fehlt in der Cloud.", "salvage")
+        return e("Die Lieferung ist noch nicht vollständig in der Cloud.", "retry")
     if isinstance(exc, PermissionError):
         return e("VidTransfer darf auf einen Ordner nicht zugreifen.", "open_privacy")
     if isinstance(exc, OSError) and exc.errno == errno.ENOSPC:
-        return e("Der Speicherplatz ist voll – auf diesem Computer oder in Google Drive.", "retry")
+        return e("Der Speicherplatz ist voll – auf diesem Computer oder in der Cloud.", "retry")
     if isinstance(exc, TransferError):
         if "Manifest" in str(exc):
-            return e("Diese Lieferung ist noch nicht vollständig in Google Drive angekommen.", "retry")
+            return e("Diese Lieferung ist noch nicht vollständig in der Cloud angekommen.", "retry")
         return e("Beim Empfangen ist ein Lesefehler aufgetreten. Erneut versuchen setzt "
                  "dort fort, wo es aufgehört hat.", "retry")
     verb = "Senden" if kind == "send" else "Empfangen"

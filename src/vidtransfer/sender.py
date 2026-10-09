@@ -311,7 +311,7 @@ class SourceMissingError(FileNotFoundError):
 def _check_drive_root(drive_root: Path) -> Path:
     drive_root = Path(drive_root)
     if not drive_root.is_dir():
-        raise DriveFolderMissingError(f"Drive-Ordner {drive_root} nicht gefunden")
+        raise DriveFolderMissingError(f"Cloud-Ordner {drive_root} nicht gefunden")
     return drive_root
 
 
@@ -329,7 +329,7 @@ def send_folder(
         raise SourceMissingError(f"Ordner {src} nicht gefunden")
     drive_root = _check_drive_root(drive_root)
     if drive_root.resolve() == src or src in drive_root.resolve().parents:
-        raise ValueError("Der Drive-Ordner darf nicht im Quellordner liegen")
+        raise ValueError("Der Cloud-Ordner darf nicht im Quellordner liegen")
     progress(0, 0, "Ordner wird eingelesen …")
     return _send(src.name, scan_source(src), drive_root, opts, progress, cancel, sender, str(src))
 

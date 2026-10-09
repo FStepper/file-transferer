@@ -138,11 +138,11 @@ priv ditto "$SRC_APP" "$DEST_APP" || fail "Kopieren fehlgeschlagen."
 priv xattr -dr com.apple.quarantine "$DEST_APP" 2>/dev/null
 say "Fertig kopiert."
 
-# ---------------------------------------------------------------- Google Drive folder
+# ---------------------------------------------------------------- cloud folder (default: Google Drive)
 say ""
-say "1) Google-Drive-Ordner für die Lieferungen"
+say "1) Cloud-Ordner für die Lieferungen"
 say "   Wichtig: Auf allen Macs muss derselbe Ordner gewählt werden. Bei verschiedenen"
-say "   Google-Konten einen Ordner freigeben (Bearbeiter) und auf den anderen Konten"
+say "   Cloud-Konten einen Ordner freigeben (Bearbeiter) und auf den anderen Konten"
 # shellcheck disable=SC1111  # German quotation marks in the text
 say "   zu „Meine Ablage“ hinzufügen – oder eine geteilte Ablage verwenden."
 
@@ -154,7 +154,7 @@ done < <(vt config --list-drives 2>/dev/null)
 
 CURRENT="$(vt_get drive)"
 if [ ${#LOCATIONS[@]} -eq 0 ]; then
-    say "   Kein Google-Drive-Ordner gefunden. Läuft Google Drive und ist es angemeldet?"
+    say "   Kein Google-Drive-Ordner gefunden. Bitte den Pfad zum Cloud-Ordner eingeben."
 else
     i=1
     for loc in "${LOCATIONS[@]}"; do

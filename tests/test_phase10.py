@@ -213,7 +213,7 @@ def test_free_drive_space_after_arrival(env, tmp_path):
     assert run_until(app, lambda: receive_cards(app) and receive_cards(app)[0].state == DONE)
     d = receive_cards(app)[0]
     card = app._card(d)
-    assert card.link.winfo_manager() and "Platz in Google Drive freigeben" in card.link.cget("text")
+    assert card.link.winfo_manager() and "Platz in der Cloud freigeben" in card.link.cget("text")
     app.free_drive(d)
     assert not res.target.exists() and (inbox / "Drehtag 3" / "a.mp4").exists()
     assert d.hint == gui.DELETED_HINT and not app.can_free_drive(d)
@@ -242,4 +242,4 @@ def test_waiting_card_shows_incoming_percent():
 
     assert running_text("receive", 0, 0, "Warte auf Stripe 3", Eta(), 35).startswith(
         "Wird noch hochgeladen (35 %)")
-    assert running_text("receive", 0, 0, "Warte auf Stripe 3", Eta(), None).startswith("Wartet auf Google Drive")
+    assert running_text("receive", 0, 0, "Warte auf Stripe 3", Eta(), None).startswith("Wartet auf die Cloud")
