@@ -314,8 +314,9 @@ stripe, a packet or a manifest is, and without ever wondering "is it done?".
 
 ### Principles
 
-1. **Two verbs:** *senden* and *empfangen*. Everything else happens automatically
-   or is hidden under "Details" / "Einstellungen".
+1. **One job per Mac:** a sender Mac only *sends*, the receiver Mac only
+   *receives* (automatically). Everything else happens automatically or is
+   hidden in the settings window.
 2. **Plain language** with a fixed glossary (below); numbers in %, GB and minutes.
 3. **The app says what happens next and when it is done**, on both sides.
 4. **One action per problem:** every error message names the cause in one
@@ -336,132 +337,172 @@ stripe, a packet or a manifest is, and without ever wondering "is it done?".
 | verify | not a separate action; happens automatically (see U10) |
 | Drive target folder | shown only in the settings |
 
-### Target concept
+### Decisions (2026-10-09)
+
+- **Setup:** two **sender Macs** and one **receiver Mac**. The roles are fixed.
+- **No setup assistant and no pre-flight checks** (former U7/U8 dropped).
+- **No Apple Developer account:** no notarization. Installation is done once by a
+  technical person with an install script (U15).
+- **UI toolkit stays Tk** for now. The window gets far fewer elements and
+  becomes role-specific: a sender Mac only shows sending, the receiver Mac only
+  shows receiving.
+
+### Consequences of two senders
+
+- **Separate folder per sender (must-have):** both senders write into the same
+  shared Drive folder. If both send a folder with the same name at about the
+  same time, each Mac creates it before Drive has synced, and the packet names
+  (`s000000_00.vtp`, …) collide. Deliveries therefore go to
+  `<Drive folder>/<sender name>/<folder name>`. The sender name defaults to the
+  Mac's computer name (`scutil --get ComputerName`) and can be changed in the
+  settings.
+- **Sender name in the manifest**, so the receiver can show "von Kamera-Mac".
+- **Shared Drive folder:** all three Macs must see the same folder. Either all
+  three use the same Google account, or one folder (e.g. `VidTransfer`) is shared
+  with edit rights and added to "Meine Ablage" on the other accounts (or a
+  shared drive is used). Drive detection must also find `Shared drives` /
+  `Geteilte Ablagen` folders. This is documented as a one-time setup step.
+- The receiver watches all sender subfolders.
+
+### Target concept (Tk)
+
+**Sender Mac** – one drop zone, one list:
 
 ```
-┌───────────────────────────────────────────────────────────┐
-│  VidTransfer                                          ⚙   │
-│                                                           │
-│   ┌────────────────────────┐   ┌────────────────────────┐ │
-│   │          ⬆             │   │          ⬇             │ │
-│   │    Videos senden       │   │   Videos empfangen     │ │
-│   │  Ordner hierher ziehen │   │  2 neue Lieferungen    │ │
-│   └────────────────────────┘   └────────────────────────┘ │
-│                                                           │
-│  Lieferungen                                              │
-│  ┌──────────────────────────────────────────────────────┐ │
-│  │ Drehtag 3 · 48 Dateien · 212 GB                       │ │
-│  │ ████████████░░░░░░░  Wird hochgeladen – noch ~2 Std.  │ │
-│  │ Mac bleibt wach, bis alles hochgeladen ist.           │ │
-│  ├──────────────────────────────────────────────────────┤ │
-│  │ Drehtag 2 · 31 Dateien · 140 GB                       │ │
-│  │ ✔ Beim Empfänger angekommen (gestern 18:40)           │ │
-│  │                    [Platz in Google Drive freigeben]  │ │
-│  └──────────────────────────────────────────────────────┘ │
-└───────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│ VidTransfer                              Einstellungen │
+│                                                     │
+│  ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐  │
+│     Ordner mit Videos hierher ziehen                │
+│  │              [Ordner auswählen …]              │  │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │
+│                                                     │
+│  Drehtag 3 · 212 GB                                 │
+│  ███████████░░░░░░░░  Wird hochgeladen       [Stopp] │
+│  ─────────────────────────────────────────────────  │
+│  Drehtag 2 · 140 GB                                 │
+│  ✔ Beim Empfänger angekommen · gestern 18:40         │
+└─────────────────────────────────────────────────────┘
 ```
 
-Each delivery is a card with exactly one status line and at most one or two
-buttons. The status steps are the same on both sides:
-*Wird vorbereitet → Wird hochgeladen → Bereit zum Empfangen → Wird empfangen →
-Angekommen ✔*, plus the exceptional states *Pausiert*, *Wartet auf Google Drive*
-and *Unvollständig – Aktion nötig*.
+**Receiver Mac** – no buttons for the normal case:
+
+```
+┌─────────────────────────────────────────────────────┐
+│ VidTransfer                              Einstellungen │
+│ Neue Lieferungen kommen automatisch nach            │
+│ Filme › VidTransfer                                 │
+│                                                     │
+│  Drehtag 3 · von Kamera-Mac · 212 GB                │
+│  ██████░░░░░░░░░░░░  Wird noch hochgeladen (35 %)    │
+│  ─────────────────────────────────────────────────  │
+│  Interview · von Ton-Mac · 18 GB                    │
+│  ✔ Angekommen · heute 09:12          [Im Finder zeigen] │
+│  ─────────────────────────────────────────────────  │
+│  Drehtag 1 · von Kamera-Mac · 96 GB                 │
+│  ⚠ 2 Dateien fehlen noch – werden nachgeliefert      │
+└─────────────────────────────────────────────────────┘
+```
+
+What disappears from the main window: the target path line, "Aus Drive
+empfangen", "Nur prüfen", "Log öffnen", the log text area, the general cancel
+button and the status line. They move to the settings window or become automatic.
+
+Each delivery is one row (card) with name, size (receiver: sender name), one
+progress bar while it is running, one status line and at most one button. The
+status steps are the same on both sides:
+*Wird vorbereitet → Wird hochgeladen → Wird empfangen → Angekommen ✔*, plus
+*Pausiert*, *Wartet auf Google Drive* and *Unvollständig – Aktion nötig*.
+The list is kept across restarts.
+
+**Settings window** (small, rarely needed): role (Sender / Empfänger), sender
+name, Drive folder, inbox folder, "Lieferung manuell öffnen …" (old receive and
+verify functions), "Protokoll öffnen", "Erweitert" (k, m, packet size, compression).
 
 ### Measures
 
-**Main window and wording (phase 9)**
+**Phase 9 – sender window and wording**
 - **U1 Plain language:** replace every user-facing text according to the
   glossary; progress as %, GB and remaining time; repairs only as a reassuring note.
-- **U2 New main window:** two large action tiles (also drop zones) and the list
-  of deliveries as cards (running and recent, persisted across restarts).
-- **U3 Hide technical details:** the log moves behind "Details anzeigen" on a
-  card; k/m/packet size/Drive folder/compression move to "Einstellungen →
-  Erweitert". "Nur prüfen" disappears from the main window (U10 replaces it).
+- **U2 Role-specific main window (Tk):** sender layout as above; delivery cards as
+  a vertical list of `ttk.Frame` rows with one `ttk.Progressbar`, one status label
+  and one button; the drop zone as a `Canvas` with a dashed border that also opens
+  the folder dialog on click. Role from the settings (default: Sender).
+- **U3 Hide technical details:** log, receive/verify by hand and advanced
+  parameters move to the settings window. "Details" on a card shows the last
+  log lines of that delivery.
 - **U4 Error catalogue:** a fixed list of plain-language messages, each with one
-  action. Examples:
-  - "Google Drive läuft nicht." → [Google Drive öffnen]
-  - "Auf diesem Mac fehlen 35 GB Speicherplatz." → [Anderen Speicherort wählen]
-  - "Ein Teil der Lieferung fehlt endgültig." → [Alles andere jetzt holen] [Beim Absender neu anfordern]
-  - "Eine Datei hat sich während des Sendens verändert." → [Erneut senden]
+  action, e.g. "Google Drive läuft nicht." → [Google Drive öffnen]; "Auf diesem
+  Mac fehlen 35 GB Speicherplatz." → [Anderen Speicherort wählen]; "Eine Datei
+  hat sich während des Sendens verändert." → [Erneut senden]. Technical details go
+  into "Details kopieren"; no stack traces.
+- **U9 Drop onto the window, files too:** dropping onto the Dock icon already
+  works. Drop onto the window needs `tkdnd` (package `tkinterdnd2`, ships the
+  native library for macOS arm64/x86_64); to be checked in the PyInstaller build.
+  If that fails: keep the Dock icon plus a click on the drop zone. Single files
+  and several items are accepted: every dropped folder becomes one delivery;
+  loose files become one delivery named "Dateien <Datum>".
+- **U20 Sender subfolder and sender name** (see above), plus the delivery history.
 
-  Technical details go into a "Details kopieren" text for support; no stack traces.
-- **U9 Drop anywhere, files too:** drag & drop onto the window (macOS: Tk with
-  `tkdnd`/`tkinterdnd2`, or natively if the UI moves to a web view, see U18).
-  Single files and several items are accepted: every dropped folder becomes one
-  delivery; loose files become one delivery named "Dateien <Datum>".
+**Phase 10 – receiver window and automatic receiving**
+- **U5/U6 Automatic receiving:** the receiver Mac watches all sender subfolders
+  in the Drive folder and receives every new delivery automatically into the
+  inbox (default `~/Movies/VidTransfer/<sender name>/<folder name>`), including
+  resuming after restarts and the partial-recovery decision (automatic: restore
+  everything that is there and wait for the rest). A notification says when a
+  delivery has arrived.
+- **U21 Upload progress on the receiver:** while the sender is still uploading,
+  the receiver can already tell how far it is by counting the packets that have
+  arrived against the expected number (from the in-progress manifest) –
+  "Wird noch hochgeladen (35 %)".
+- Manual receiving (old flow) stays available under "Lieferung manuell öffnen …".
 
-**Receiving without searching (phase 10)**
-- **U5 Delivery browser:** "Videos empfangen" lists the deliveries found in the
-  Drive folder (name, size, date, status such as "wird noch hochgeladen – 40 %" or
-  "bereit"). One click on [Empfangen] – no folder dialog inside Google Drive.
-- **U6 Automatic receiving (optional, recommended for the receiving Mac):** the
-  app watches the Drive folder and receives new deliveries automatically into a
-  fixed inbox (default `~/Movies/VidTransfer`), including resuming after restarts.
-  A notification says when a delivery has arrived.
-- **U7 First-run assistant** (3 steps): (1) check Google Drive: installed, signed
-  in, folder found and writable – otherwise show how to fix it; (2) "Wofür nutzen
-  Sie diesen Mac?" Senden / Empfangen / Beides; (3) inbox folder for receiving.
-  Optionally a test delivery with a small file.
-- **U8 Pre-flight checks before sending**, each with a plain warning: Google
-  Drive not running or folder missing; not enough free space in Google Drive
-  (size × 1.3, if the quota can be read) or locally (one stripe); Mac on battery
-  ("Bitte Netzteil anschließen"); source on an external drive ("Laufwerk nicht
-  trennen, bis 'Hochgeladen' angezeigt wird"); folder already inside Google Drive.
+**Phase 11 – "is it done?" back channel through Drive**
+- **U10 Receipt and receiver status:** the receiver writes `status/receiver.json`
+  (progress) and `status/received.json` (everything verified) into the delivery
+  folder. The sender's card then shows "Wird empfangen – 60 %" and finally
+  "Beim Empfänger angekommen ✔". Each side writes only its own files, so Drive
+  never has to merge conflicting versions.
+- **U11 Self-healing:** if parts are lost for good, the receiver writes
+  `status/request.json`; if the sender's app is open and the source folder still
+  exists, it re-sends exactly these packets automatically. The cards show
+  "Fehlende Teile werden nachgeliefert".
+- **U12 Guided clean-up:** after the receipt, the sender card offers [Platz in
+  Google Drive freigeben (212 GB)], with the hint that Drive only frees the space
+  after its trash is emptied. Never automatic.
 
-**"Is it done?" – back channel through Drive (phase 11)**
-- **U10 Receipt and receiver status:** the receiver writes small status files
-  into the delivery folder (`status/receiver.json` with progress, `status/received.json`
-  when everything is verified). The sender's app shows "Wird empfangen – 60 %"
-  and finally "Beim Empfänger angekommen ✔". This replaces "Nur prüfen" for the
-  normal case. Each side writes only its own files, so Drive never has to merge
-  conflicting versions.
-- **U11 Self-healing:** if the receiver finds parts lost for good, it writes
-  `status/request.json` (missing stripes). If the sender's app is open and the
-  source folder is still there, it re-sends exactly these packets automatically
-  (sending is deterministic). The receiver completes the delivery on its own. The
-  user only sees "Fehlende Teile werden nachgeliefert".
-- **U12 Guided clean-up:** after the receipt, both sides offer [Platz in Google
-  Drive freigeben (212 GB)], with the hint that Google Drive only frees the space
-  after its trash has been emptied. Never automatic.
-
-**Upload status and time (phase 12)**
+**Phase 12 – upload status and keeping awake**
 - **U13 Upload status from Google Drive:** spike on whether Google Drive's macOS
-  File Provider reports the upload state of each file (`NSURLUbiquitousItemIsUploadedKey`,
-  `…IsUploadingKey`, `…UploadingErrorKey` via PyObjC). If yes: real upload
-  progress per delivery, "Hochgeladen ✔", and `caffeinate` only until the upload
-  is finished (instead of "as long as the app is open"). If not: U10 receipts
-  remain the source of truth, and the hint stays "App offen lassen".
-- **U14 Time estimates:** remaining time for preparing (measured throughput) and
-  uploading (from U13 or U10); clear statements like "Sie können den Mac jetzt
+  File Provider reports the upload state per file (`NSURLUbiquitousItemIsUploadedKey`
+  and related keys via PyObjC). If yes: real "Hochgeladen ✔" on the sender and
+  `caffeinate` only until then. If not: the receipt (U10) and the receiver's packet
+  count (U21) are the source of truth.
+- **U14 Time estimates** for preparing and uploading; "Sie können den Mac jetzt
   zuklappen" only when it is really safe.
 
-**Installation and everyday use (phase 13)**
-- **U15 Signed and notarized app** as a DMG ("in Programme ziehen"): no
-  Gatekeeper warnings and no `xattr` instructions. Requires an Apple Developer
-  account (99 €/year).
-- **U16 Menu bar mode and launch at login** for the receiving Mac: a small icon
-  shows the status; together with U6, receiving works without opening the app.
+**Phase 13 – installation**
+- **U15 Install script instead of notarization:** a double-clickable
+  `VidTransfer installieren.command` next to the app copies it to /Applications,
+  removes the quarantine flag (`xattr -dr com.apple.quarantine`), asks once
+  whether this Mac is a sender or the receiver, and sets the role, sender name
+  and Drive folder. On the receiver it also installs a LaunchAgent so the app
+  starts at login (U16). This is done once per Mac by a technical person; the
+  users never see Gatekeeper dialogs or settings.
+- **U16 Start at login on the receiver Mac** (LaunchAgent, see U15). A menu bar
+  icon is not possible with Tk alone and is postponed.
 
 **Cross-cutting**
-- **U17 Notifications** only for events that matter: ready to receive, arrived,
-  action needed.
-- **U18 Look and accessibility:** larger fonts, clear contrast, dark mode,
-  keyboard operation. Decision needed: keep Tk (`ttk` aqua, limited look,
-  drag & drop needs `tkdnd`) or move the UI to a small HTML interface in a
-  native window (`pywebview`/WKWebView: modern look, native drag & drop with full
-  paths, easier to design; one more dependency). Recommendation: a short spike
-  with `pywebview` before phase 9, because U2/U9 depend on it.
-- **U19 Usability tests:** 2–3 non-technical people, tasks "Schicke den Ordner
-  Drehtag 3" and "Hol die neue Lieferung ab", without help. Measure time,
-  questions and mistakes; repeat after phases 9 and 10.
+- **U17 Notifications** only for: arrived, action needed (receiver); arrived at
+  the receiver (sender).
+- **U18 Look and accessibility within Tk:** larger fonts for names and status,
+  clear contrast, dark mode via `ttk` aqua, keyboard operation. Moving to an HTML UI
+  (`pywebview`) stays an option for later.
+- **U19 Usability tests:** 1–2 people per role, tasks "Schicke den Ordner
+  Drehtag 3" (sender) and "Wo ist die Lieferung von heute?" (receiver), without
+  help. Repeat after phases 9 and 10.
 
-### Open questions
-
-- Who uses which Mac – one fixed sender and one fixed receiver, or both
-  directions? (decides on U6/U16 as defaults)
-- Is an Apple Developer account available for signing (U15)?
-- Tk or HTML UI (U18)?
-- Should automatic receiving (U6) be on by default on a receiving Mac?
+Dropped by decision: setup assistant (U7), pre-flight checks before sending (U8),
+signed and notarized DMG.
 
 ## Implementation
 
@@ -477,14 +518,15 @@ and *Unvollständig – Aktion nötig*.
    (incremental), jump on resume, v1 stays readable
 8. ✔ **Unpacking, part 3:** `--only`, `list`, partial recovery, emergency mode
    without manifest, NFC/Windows name handling
-9. **UI, part 1 – plain and simple:** plain-language texts and error catalogue,
-   new main window (two actions + delivery cards), technical details hidden,
-   drop onto the window, single files (see U1–U4, U9)
-10. **UI, part 2 – receiving without searching:** delivery browser, automatic
-    receiving, first-run assistant, pre-flight checks (U5–U8)
-11. **Back channel:** receiver status and receipt in the transfer folder, "arrived"
-    on the sender, automatic re-send of missing parts, guided clean-up (U10–U12)
+9. **UI, part 1 – sender:** plain-language texts and error catalogue, role-specific
+   main window with drop zone and delivery cards, settings window, sender
+   subfolder and sender name, drop onto the window, single files (U1–U4, U9, U20)
+10. **UI, part 2 – receiver:** automatic receiving into the inbox, delivery list
+    with sender name, upload progress from the packet count (U5, U6, U21)
+11. **Back channel:** receiver status and receipt in the delivery folder,
+    "arrived" on the sender, automatic re-send of missing parts, guided clean-up
+    (U10–U12)
 12. **Upload status:** spike on the macOS File Provider upload state; keep awake
-    until uploaded; real time estimates (U13–U14)
-13. **Delivery:** signed and notarized DMG, optional menu bar mode and launch at
-    login (U15–U16)
+    until uploaded; time estimates (U13, U14)
+13. **Installation:** install script (quarantine, role, sender name, Drive folder),
+    start at login on the receiver Mac (U15, U16)
