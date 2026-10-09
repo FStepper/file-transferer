@@ -36,9 +36,8 @@ import zstandard
 from vidtransfer import __version__
 from vidtransfer.erasure import decode_stripe
 from vidtransfer.manifest import STATUS_COMPLETE, read_manifest
-from vidtransfer.packet import (
-    HEADER_SIZE, PacketHeader, data_len, packet_name, parse_packet_name, read_header, verify_packet,
-)
+from vidtransfer.packet import HEADER_SIZE, data_len, packet_name, parse_packet_name, read_header
+from vidtransfer.prefetch import LOOKAHEAD, PacketVerifier, StripeCheck
 from vidtransfer.util import (
     Cancelled, ProgressFn, atomic_write_bytes, check_cancel, free_space, human_bytes,
     human_duration, null_progress, sleep_cancellable, unique_path,
@@ -98,6 +97,7 @@ class VerifyResult:
     degraded: list[int] = field(default_factory=list)       # repairable via parity
     unrecoverable: list[int] = field(default_factory=list)  # fewer than k valid packets
     bad_packets: list[str] = field(default_factory=list)
+    stalled_packets: list[str] = field(default_factory=list)  # read did not finish within the timeout
     files_checked: int = 0
     bytes_checked: int = 0
     content_verified: bool = False      # stream decoded and every file hash matched
@@ -108,26 +108,7 @@ class VerifyResult:
         return self.complete and not self.unrecoverable and self.content_verified
 
 
-# ---------------------------------------------------------------- packet checks
-
-def _check_packet(folder: Path, man: dict, s: int, i: int, cancel=None) -> Optional[PacketHeader]:
-    """Fully verify one packet (header, size, SHA-256) against the manifest."""
-    p = man["params"]
-    path = folder / packet_name(s, i)
-    if not path.exists():
-        return None
-    hdr = verify_packet(path, cancel)
-    if (not hdr or hdr.transfer_id != bytes.fromhex(man["transfer_id"]) or hdr.stripe != s
-            or hdr.index != i or hdr.k != p["k"] or hdr.m != p["m"]):
-        return None
-    expected = (man.get("packets") or {}).get(path.name)
-    if expected and expected != hdr.sha256.hex():
-        return None
-    lens = man.get("stripe_lens")
-    if lens and s < len(lens) and lens[s] != hdr.stripe_len:
-        return None
-    return hdr
-
+# ---------------------------------------------------------------- status
 
 def _highest_stripe(folder: Path) -> int:
     best = -1
@@ -170,9 +151,14 @@ def transfer_status(folder: Path) -> tuple[Optional[dict], list[StripeStatus]]:
 # ---------------------------------------------------------------- stripe data source
 
 class _StripeStream:
-    """Provides the (compressed) data stream stripe by stripe as a readable object."""
+    """Provides the (compressed) data stream stripe by stripe as a readable object.
 
-    def __init__(self, folder: Path, work: Path, progress: ProgressFn, cancel, wait: bool):
+    Packets are verified by a `PacketVerifier` in background threads; the next
+    `LOOKAHEAD` stripes are prefetched while the current one is being unpacked.
+    """
+
+    def __init__(self, folder: Path, work: Path, progress: ProgressFn, cancel, wait: bool,
+                 verifier: Optional[PacketVerifier] = None):
         self.folder = folder
         self.work = work
         self.progress = progress
@@ -181,6 +167,9 @@ class _StripeStream:
         self.manifest = read_manifest(folder)
         p = self.manifest["params"]
         self.k, self.m = p["k"], p["m"]
+        self._own_verifier = verifier is None
+        self.verifier = verifier or PacketVerifier(folder, self.manifest, cancel)
+        self.stalled_packets: set[str] = set()
         self.stripe = 0
         self.consumed = 0
         self.repaired = 0
@@ -202,6 +191,7 @@ class _StripeStream:
             new = read_manifest(self.folder)
             if new and new["transfer_id"] == self.manifest["transfer_id"]:
                 self.manifest = new
+                self.verifier.update_manifest(new)
 
     def _complete(self) -> bool:
         return self.manifest.get("status") == STATUS_COMPLETE
@@ -214,20 +204,25 @@ class _StripeStream:
             if self._complete() and s >= self.manifest["stripes"]:
                 return False
 
-            valid: dict[int, PacketHeader] = {}
-            for i in range(self.k):
-                self._report(f"Stripe {s + 1}: prüfe Paket {i + 1}/{self.k + self.m} …")
-                hdr = _check_packet(self.folder, self.manifest, s, i, self.cancel)
-                if hdr:
-                    valid[i] = hdr
-            # Parity packets are only touched when needed (saves downloads)
-            for i in range(self.k, self.k + self.m):
-                if len(valid) >= self.k:
-                    break
-                self._report(f"Stripe {s + 1}: prüfe Paritätspaket {i - self.k + 1}/{self.m} …")
-                hdr = _check_packet(self.folder, self.manifest, s, i, self.cancel)
-                if hdr:
-                    valid[i] = hdr
+            # Current stripe first, so idle workers do not start on look-ahead packets
+            self.verifier.prefetch(s)
+            for ahead in range(s + 1, s + 1 + LOOKAHEAD):
+                if not (self._complete() and ahead >= self.manifest["stripes"]):
+                    self.verifier.prefetch(ahead)
+
+            def on_update(res: StripeCheck) -> None:
+                msg = f"Stripe {s + 1}: {len(res.valid)}/{self.k} Pakete bereit, {res.open} werden geladen/geprüft …"
+                if res.stalled:
+                    msg += f" ({len(res.stalled)} hängt/hängen – nutze Parität)"
+                self._report(msg)
+
+            # Parity packets are only requested when needed (saves downloads)
+            res = self.verifier.collect(s, on_update=on_update)
+            valid = res.valid
+            for i in res.stalled:
+                if packet_name(s, i) not in self.stalled_packets:
+                    self.stalled_packets.add(packet_name(s, i))
+                    log.warning("Stripe %d: packet %d stalled, using parity instead", s, i)
 
             stripe_lens = {h.stripe_len for h in valid.values()}
             if len(valid) >= self.k and len(stripe_lens) == 1:
@@ -246,6 +241,7 @@ class _StripeStream:
                                   stripe_len, self.k, self.m, out, self.cancel)
                     self._segments = [(out, 0, stripe_len)]
                     self.repaired += 1
+                self.verifier.forget_before(s)
                 return True
 
             if not self.wait:
@@ -298,6 +294,8 @@ class _StripeStream:
         if self._fh:
             self._fh.close()
             self._fh = None
+        if self._own_verifier:
+            self.verifier.close()
 
 
 def _open_tar(stream: _StripeStream, man: dict):
@@ -457,6 +455,12 @@ def _unpack(stream: _StripeStream, partial: Path, state: _ReceiveState,
             state.save()
             stats.written += 1
             progress(stream.consumed, stream.total(), f"Entpackt: {rel}")
+    except (zstandard.ZstdError, tarfile.TarError) as exc:
+        # Every packet passed its SHA-256 check, so the data was most likely read
+        # incorrectly (transient I/O or memory error). Finished files are kept.
+        log.error("Stream could not be decoded: %s", exc)
+        raise TransferError("Datenstrom fehlerhaft gelesen (vermutlich ein vorübergehender Lese- oder "
+                            "Speicherfehler). Bitte erneut empfangen – fertige Dateien bleiben erhalten.") from exc
     finally:
         tar.close()
         if source is not None:
@@ -628,31 +632,45 @@ def verify_transfer(
     stripes = man["stripes"] if complete else _highest_stripe(folder) + 1
     res = VerifyResult(man["name"], complete, stripes, 0)
 
-    total, done = stripes * (k + m), 0
-    for s in range(stripes):
-        valid = 0
-        for i in range(k + m):
-            check_cancel(cancel)
-            progress(done, total, f"Prüfe Stripe {s + 1}/{stripes}, Paket {i + 1}/{k + m} …")
-            if _check_packet(folder, man, s, i, cancel):
-                valid += 1
+    # Phase 1: check all k+m packets of every stripe in parallel. All checks are
+    # queued at once (ordered by stripe), results are collected stripe by stripe.
+    verifier = PacketVerifier(folder, man, cancel)
+    try:
+        for s in range(stripes):
+            for i in range(k + m):
+                verifier.request(s, i)
+        total = stripes * (k + m)
+        for s in range(stripes):
+            def on_update(r: StripeCheck, s=s) -> None:
+                done = s * (k + m) + len(r.valid) + len(r.bad) + len(r.stalled)
+                progress(done, total, f"Prüfe Stripe {s + 1}/{stripes} ({r.open} Pakete in Arbeit) …")
+
+            r = verifier.collect(s, need_all=True, on_update=on_update)
+            res.bad_packets += [packet_name(s, i) for i in r.bad]
+            res.stalled_packets += [packet_name(s, i) for i in r.stalled]
+            if len(r.valid) == k + m:
+                res.intact += 1
+            elif len(r.valid) >= k:
+                res.degraded.append(s)
             else:
-                res.bad_packets.append(packet_name(s, i))
-            done += 1
-        if valid == k + m:
-            res.intact += 1
-        elif valid >= k:
-            res.degraded.append(s)
-        else:
-            res.unrecoverable.append(s)
-    log.info("Verify %s: %d intact, %d degraded, %d unrecoverable, %d bad packet(s)",
-             folder, res.intact, len(res.degraded), len(res.unrecoverable), len(res.bad_packets))
+                res.unrecoverable.append(s)
+        log.info("Verify %s: %d intact, %d degraded, %d unrecoverable, %d bad / %d stalled packet(s)",
+                 folder, res.intact, len(res.degraded), len(res.unrecoverable),
+                 len(res.bad_packets), len(res.stalled_packets))
 
-    if not (deep and complete and not res.unrecoverable):
-        return res
+        if deep and complete and not res.unrecoverable:
+            # Phase 2 reuses the cached packet results, so nothing is hashed twice
+            _verify_content(folder, man, res, verifier, progress, cancel)
+    finally:
+        verifier.close()
+    return res
 
+
+def _verify_content(folder: Path, man: dict, res: VerifyResult, verifier: PacketVerifier,
+                    progress: ProgressFn, cancel) -> None:
+    """Decode the whole stream and compare every file hash with the manifest."""
     work = Path(tempfile.mkdtemp(prefix="vidtransfer-verify-"))
-    stream = _StripeStream(folder, work, progress, cancel, wait=False)
+    stream = _StripeStream(folder, work, progress, cancel, wait=False, verifier=verifier)
     got: dict[str, str] = {}
     try:
         tar, source = _open_tar(stream, man)
@@ -689,4 +707,3 @@ def verify_transfer(
             res.content_errors.append(f"Prüfsumme falsch: {f['path']}")
     res.files_checked = len(got)
     res.content_verified = not res.content_errors
-    return res

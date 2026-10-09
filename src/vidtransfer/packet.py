@@ -17,7 +17,7 @@ import struct
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from vidtransfer.util import check_cancel
 
@@ -100,8 +100,13 @@ def read_header(path: Path) -> Optional[PacketHeader]:
         return None
 
 
-def verify_packet(path: Path, cancel=None) -> Optional[PacketHeader]:
-    """Check header, file size and payload SHA-256 (reads the whole file)."""
+def verify_packet(path: Path, cancel=None,
+                  on_progress: Optional[Callable[[int], None]] = None) -> Optional[PacketHeader]:
+    """Check header, file size and payload SHA-256 (reads the whole file).
+
+    `on_progress(nbytes)` is called after every chunk read, so callers can tell a
+    slow read from a stalled one.
+    """
     try:
         with open(path, "rb") as f:
             hdr = PacketHeader.unpack(f.read(HEADER_SIZE))
@@ -114,6 +119,8 @@ def verify_packet(path: Path, cancel=None) -> Optional[PacketHeader]:
                     return None  # truncated
                 h.update(chunk)
                 remaining -= len(chunk)
+                if on_progress:
+                    on_progress(len(chunk))
             if f.read(1):
                 return None  # longer than expected
     except (OSError, PacketError):
