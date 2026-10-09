@@ -305,20 +305,21 @@ stripe, a packet or a manifest is, and without ever wondering "is it done?".
   "Aus Drive empfangen", "Nur prüfen"), target path, log, cancel, reveal, open log.
 - **Receiving means searching:** the user has to find the right transfer folder
   inside Google Drive in a folder dialog, then pick a destination.
-- **"Is it done?" has no answer:** after packing, the app says "Google Drive
-  lädt jetzt hoch" but cannot tell when the upload has finished or whether the
-  recipient got everything. This is the biggest practical gap.
+- **"Is it done?" is unclear:** after packing, the app says "Google Drive lädt
+  jetzt hoch" in a long message. Decided: for sending, the job ends when
+  everything is in the Drive folder, and the card says exactly that.
 - **Errors are text dumps** without a clear next step.
 - **Drop only onto the app icon**, not onto the window; single files are refused.
 - **First start:** Gatekeeper warnings, no check whether Google Drive is set up.
 
 ### Principles
 
-1. **One job per Mac:** a sender Mac only *sends*, the receiver Mac only
-   *receives* (automatically). Everything else happens automatically or is
-   hidden in the settings window.
+1. **Two modes, one at a time:** *Senden* or *Empfangen*, switched at the top
+   and remembered. Everything else happens automatically or is hidden in the
+   settings window.
 2. **Plain language** with a fixed glossary (below); numbers in %, GB and minutes.
-3. **The app says what happens next and when it is done**, on both sides.
+3. **The app says what happens next and when it is done.** For sending, "done"
+   means: everything is in the Google Drive folder.
 4. **One action per problem:** every error message names the cause in one
    sentence and offers one button that fixes it.
 5. **Safe defaults, no configuration:** nothing is deleted without asking;
@@ -334,44 +335,58 @@ stripe, a packet or a manifest is, and without ever wondering "is it done?".
 | receiving, verifying, reconstructing | **Wird empfangen** (repairs only as a note: "beschädigte Teile wurden automatisch repariert") |
 | manifest, index, state file | not shown at all |
 | "(incomplete)", lost stripes | **Unvollständig – x Dateien fehlen noch** + action |
-| verify | not a separate action; happens automatically (see U10) |
+| verify | not a separate action; receiving verifies every file anyway |
 | Drive target folder | shown only in the settings |
 
 ### Decisions (2026-10-09)
 
-- **Setup:** two **sender Macs** and one **receiver Mac**. The roles are fixed.
-  Only one sender uploads at a time, so simultaneous sends do not happen.
-- **No setup assistant and no pre-flight checks** (former U7/U8 dropped).
-- **No Apple Developer account:** no notarization. Installation is done once by a
-  technical person with an install script (U15).
-- **UI toolkit stays Tk** for now. The window gets far fewer elements and
-  becomes role-specific: a sender Mac only shows sending, the receiver Mac only
-  shows receiving.
+- **Setup:** two Macs usually send, one Mac usually receives. Only one Mac
+  uploads at a time, so simultaneous sends do not happen.
+- **One app, two modes:** every Mac can send *and* receive. The window has a mode
+  switch **Senden | Empfangen**; the app remembers the last mode and opens in it.
+- **The sender's job ends in the Drive folder:** as soon as all packets are in the
+  local Google Drive folder, the delivery is done on the sending Mac. The app does
+  not track Google Drive's upload, and the sender gets no feedback from the
+  receiver.
+- **No setup assistant and no pre-flight checks.**
+- **No Apple Developer account:** no notarization; a one-time install script
+  instead (U15).
+- **UI toolkit stays Tk** for now, with far fewer elements than today.
 
-### Consequences of two senders
+### Consequences
 
-- **No sender subfolders:** both senders write directly into the shared Drive
-  folder, as today. Collisions would only occur if two Macs sent a folder with
-  the same name at the same moment, before Drive has synced – this does not
-  happen in this setup. Sending folders with the same name one after another is
-  already handled: the sender sees the existing (synced) delivery and uses
-  `<name> (2)`.
-- **Sender name in the manifest**, so the receiver can show "von Kamera-Mac".
+- **No sender subfolders:** all senders write directly into the shared Drive
+  folder. Collisions would only occur if two Macs sent a folder with the same name
+  at the same moment, before Drive has synced – this does not happen here.
+  Sending folders with the same name one after another is already handled: the
+  sender sees the existing (synced) delivery and uses `<name> (2)`.
+- **Sender name in the manifest**, so the receiving side can show "von Kamera-Mac".
   It defaults to the Mac's computer name (`scutil --get ComputerName`) and can be
   changed in the settings.
-- **Shared Drive folder:** all three Macs must see the same folder. Either all
-  three use the same Google account, or one folder (e.g. `VidTransfer`) is shared
-  with edit rights and added to "Meine Ablage" on the other accounts (or a
-  shared drive is used). Drive detection must also find `Shared drives` /
-  `Geteilte Ablagen` folders. This is documented as a one-time setup step.
+- **Shared Drive folder:** all Macs must see the same folder. Either they use the
+  same Google account, or one folder (e.g. `VidTransfer`) is shared with edit
+  rights and added to "Meine Ablage" on the other accounts (or a shared drive is
+  used). Drive detection must also find `Shared drives` / `Geteilte Ablagen`
+  folders. This is documented as a one-time setup step.
+- **No upload tracking:** the former measures for a receipt on the sender,
+  automatic re-sending, upload status from the File Provider and upload time
+  estimates are dropped. If parts are missing, the receiving side says so in plain
+  words ("Bitte den Ordner auf dem sendenden Mac noch einmal senden").
+- **Keeping awake:** `caffeinate` only while the app is working (preparing or
+  receiving), no longer "as long as the app is open". After sending, the card
+  says once that Google Drive now uploads in the background and the Mac should
+  stay online until Google Drive shows it as synced.
 
 ### Target concept (Tk)
 
-**Sender Mac** – one drop zone, one list:
+The mode switch is a segmented control at the top (two `ttk` toolbuttons). Each
+mode has exactly one main area and one list of deliveries.
+
+**Mode "Senden"** – one drop zone, one list:
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ VidTransfer                              Einstellungen │
+│ VidTransfer       [ Senden | Empfangen ]   Einstellungen │
 │                                                     │
 │  ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐  │
 │     Ordner mit Videos hierher ziehen                │
@@ -379,18 +394,18 @@ stripe, a packet or a manifest is, and without ever wondering "is it done?".
 │   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │
 │                                                     │
 │  Drehtag 3 · 212 GB                                 │
-│  ███████████░░░░░░░░  Wird hochgeladen       [Stopp] │
+│  ███████████░░░░░░░░  Wird vorbereitet – noch 6 Min.  [Stopp] │
 │  ─────────────────────────────────────────────────  │
 │  Drehtag 2 · 140 GB                                 │
-│  ✔ Beim Empfänger angekommen · gestern 18:40         │
+│  ✔ Liegt in Google Drive · gestern 18:40             │
 └─────────────────────────────────────────────────────┘
 ```
 
-**Receiver Mac** – no buttons for the normal case:
+**Mode "Empfangen"** – automatic, no buttons for the normal case:
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ VidTransfer                              Einstellungen │
+│ VidTransfer       [ Senden | Empfangen ]   Einstellungen │
 │ Neue Lieferungen kommen automatisch nach            │
 │ Filme › VidTransfer                                 │
 │                                                     │
@@ -401,7 +416,8 @@ stripe, a packet or a manifest is, and without ever wondering "is it done?".
 │  ✔ Angekommen · heute 09:12          [Im Finder zeigen] │
 │  ─────────────────────────────────────────────────  │
 │  Drehtag 1 · von Kamera-Mac · 96 GB                 │
-│  ⚠ 2 Dateien fehlen noch – werden nachgeliefert      │
+│  ⚠ 2 Dateien fehlen – bitte auf dem sendenden Mac    │
+│    noch einmal senden                               │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -409,29 +425,33 @@ What disappears from the main window: the target path line, "Aus Drive
 empfangen", "Nur prüfen", "Log öffnen", the log text area, the general cancel
 button and the status line. They move to the settings window or become automatic.
 
-Each delivery is one row (card) with name, size (receiver: sender name), one
-progress bar while it is running, one status line and at most one button. The
-status steps are the same on both sides:
-*Wird vorbereitet → Wird hochgeladen → Wird empfangen → Angekommen ✔*, plus
-*Pausiert*, *Wartet auf Google Drive* and *Unvollständig – Aktion nötig*.
-The list is kept across restarts.
+Each delivery is one row (card) with name, size (receiving: sender name), one
+progress bar while it is running, one status line and at most one button.
+Status steps:
+- sending: *Wird vorbereitet → ✔ Liegt in Google Drive*
+- receiving: *Wird noch hochgeladen (x %) → Wird empfangen → ✔ Angekommen*
+- exceptions: *Pausiert*, *Wartet auf Google Drive*, *Unvollständig – Aktion nötig*
 
-**Settings window** (small, rarely needed): role (Sender / Empfänger), sender
-name, Drive folder, inbox folder, "Lieferung manuell öffnen …" (old receive and
-verify functions), "Protokoll öffnen", "Erweitert" (k, m, packet size, compression).
+Both lists are kept across restarts. Running jobs keep running when the mode is
+switched; the switch only changes what is shown.
+
+**Settings window** (small, rarely needed): sender name, Drive folder, inbox
+folder, "Lieferung manuell öffnen …" (old receive and verify functions),
+"Protokoll öffnen", "Erweitert" (k, m, packet size, compression).
 
 ### Measures
 
-**Phase 9 – sender window and wording**
+**Phase 9 – mode switch, sending, wording**
 - **U1 Plain language:** replace every user-facing text according to the
   glossary; progress as %, GB and remaining time; repairs only as a reassuring note.
-- **U2 Role-specific main window (Tk):** sender layout as above; delivery cards as
-  a vertical list of `ttk.Frame` rows with one `ttk.Progressbar`, one status label
+- **U2 Main window with mode switch (Tk):** segmented control *Senden | Empfangen*
+  (remembered in the settings); sending layout as above; delivery cards as a
+  vertical list of `ttk.Frame` rows with one `ttk.Progressbar`, one status label
   and one button; the drop zone as a `Canvas` with a dashed border that also opens
-  the folder dialog on click. Role from the settings (default: Sender).
+  the folder dialog on click.
 - **U3 Hide technical details:** log, receive/verify by hand and advanced
-  parameters move to the settings window. "Details" on a card shows the last
-  log lines of that delivery.
+  parameters move to the settings window. "Details" on a card shows the last log
+  lines of that delivery.
 - **U4 Error catalogue:** a fixed list of plain-language messages, each with one
   action, e.g. "Google Drive läuft nicht." → [Google Drive öffnen]; "Auf diesem
   Mac fehlen 35 GB Speicherplatz." → [Anderen Speicherort wählen]; "Eine Datei
@@ -442,68 +462,53 @@ verify functions), "Protokoll öffnen", "Erweitert" (k, m, packet size, compress
   native library for macOS arm64/x86_64); to be checked in the PyInstaller build.
   If that fails: keep the Dock icon plus a click on the drop zone. Single files
   and several items are accepted: every dropped folder becomes one delivery;
-  loose files become one delivery named "Dateien <Datum>".
-- **U20 Sender name in the manifest** (see above), plus the delivery history.
+  loose files become one delivery named "Dateien <Datum>". A drop in mode
+  "Empfangen" onto a delivery folder still receives it (manual case).
+- **U20 Sender name in the manifest**, plus the delivery history.
 
-**Phase 10 – receiver window and automatic receiving**
-- **U5/U6 Automatic receiving:** the receiver Mac watches the Drive folder and
-  receives every new delivery automatically into the inbox (default
-  `~/Movies/VidTransfer/<folder name>`), including
-  resuming after restarts and the partial-recovery decision (automatic: restore
-  everything that is there and wait for the rest). A notification says when a
-  delivery has arrived.
-- **U21 Upload progress on the receiver:** while the sender is still uploading,
-  the receiver can already tell how far it is by counting the packets that have
-  arrived against the expected number (from the in-progress manifest) –
-  "Wird noch hochgeladen (35 %)".
+**Phase 10 – receiving**
+- **U5/U6 Automatic receiving:** in mode "Empfangen" the app watches the Drive
+  folder and receives every new delivery automatically into the inbox (default
+  `~/Movies/VidTransfer/<folder name>`), including resuming after restarts. If
+  parts are lost for good, everything else is restored automatically
+  (`(incomplete)`) and the card asks to send the folder again; the delivery is
+  completed as soon as the missing packets appear. A notification says when a
+  delivery has arrived. Deliveries that were already received are remembered and
+  not offered again.
+- **U21 Incoming progress:** while a delivery is still being uploaded, the
+  receiving side counts the packets that have arrived against the expected number
+  (from the in-progress manifest) – "Wird noch hochgeladen (35 %)". This only
+  reads the Drive folder; the sender is not involved.
+- **U12 Free up Drive space (receiving side):** after a delivery has arrived
+  completely, the card offers [Platz in Google Drive freigeben (212 GB)], with
+  the hint that Drive only frees the space after its trash is emptied. Never
+  automatic.
 - Manual receiving (old flow) stays available under "Lieferung manuell öffnen …".
 
-**Phase 11 – "is it done?" back channel through Drive**
-- **U10 Receipt and receiver status:** the receiver writes `status/receiver.json`
-  (progress) and `status/received.json` (everything verified) into the delivery
-  folder. The sender's card then shows "Wird empfangen – 60 %" and finally
-  "Beim Empfänger angekommen ✔". Each side writes only its own files, so Drive
-  never has to merge conflicting versions.
-- **U11 Self-healing:** if parts are lost for good, the receiver writes
-  `status/request.json`; if the sender's app is open and the source folder still
-  exists, it re-sends exactly these packets automatically. The cards show
-  "Fehlende Teile werden nachgeliefert".
-- **U12 Guided clean-up:** after the receipt, the sender card offers [Platz in
-  Google Drive freigeben (212 GB)], with the hint that Drive only frees the space
-  after its trash is emptied. Never automatic.
-
-**Phase 12 – upload status and keeping awake**
-- **U13 Upload status from Google Drive:** spike on whether Google Drive's macOS
-  File Provider reports the upload state per file (`NSURLUbiquitousItemIsUploadedKey`
-  and related keys via PyObjC). If yes: real "Hochgeladen ✔" on the sender and
-  `caffeinate` only until then. If not: the receipt (U10) and the receiver's packet
-  count (U21) are the source of truth.
-- **U14 Time estimates** for preparing and uploading; "Sie können den Mac jetzt
-  zuklappen" only when it is really safe.
-
-**Phase 13 – installation**
+**Phase 11 – installation**
 - **U15 Install script instead of notarization:** a double-clickable
   `VidTransfer installieren.command` next to the app copies it to /Applications,
-  removes the quarantine flag (`xattr -dr com.apple.quarantine`), asks once
-  whether this Mac is a sender or the receiver, and sets the role, sender name
-  and Drive folder. On the receiver it also installs a LaunchAgent so the app
-  starts at login (U16). This is done once per Mac by a technical person; the
-  users never see Gatekeeper dialogs or settings.
-- **U16 Start at login on the receiver Mac** (LaunchAgent, see U15). A menu bar
-  icon is not possible with Tk alone and is postponed.
+  removes the quarantine flag (`xattr -dr com.apple.quarantine`) and, if wanted,
+  sets the Drive folder and the sender name. Done once per Mac by a technical
+  person; users never see Gatekeeper dialogs.
+- **U16 Optional start at login** (LaunchAgent, asked by the install script) –
+  useful on the Mac that usually receives, so automatic receiving runs without
+  opening the app. A menu bar icon is not possible with Tk alone and is postponed.
 
 **Cross-cutting**
-- **U17 Notifications** only for: arrived, action needed (receiver); arrived at
-  the receiver (sender).
+- **U17 Notifications** only for: delivery prepared ("liegt in Google Drive"),
+  delivery arrived, action needed.
 - **U18 Look and accessibility within Tk:** larger fonts for names and status,
-  clear contrast, dark mode via `ttk` aqua, keyboard operation. Moving to an HTML UI
-  (`pywebview`) stays an option for later.
-- **U19 Usability tests:** 1–2 people per role, tasks "Schicke den Ordner
-  Drehtag 3" (sender) and "Wo ist die Lieferung von heute?" (receiver), without
-  help. Repeat after phases 9 and 10.
+  clear contrast, dark mode via `ttk` aqua, keyboard operation. Moving to an HTML
+  UI (`pywebview`) stays an option for later.
+- **U19 Usability tests:** 1–2 people per mode, tasks "Schicke den Ordner
+  Drehtag 3" and "Wo ist die Lieferung von heute?", without help. Repeat after
+  phases 9 and 10.
 
-Dropped by decision: setup assistant (U7), pre-flight checks before sending (U8),
-signed and notarized DMG.
+Dropped by decision: setup assistant, pre-flight checks before sending, signed
+and notarized DMG, fixed roles per Mac, sender subfolders, upload tracking
+(receipt on the sender, automatic re-sending, File Provider upload status,
+upload time estimates).
 
 ## Implementation
 
@@ -519,15 +524,12 @@ signed and notarized DMG.
    (incremental), jump on resume, v1 stays readable
 8. ✔ **Unpacking, part 3:** `--only`, `list`, partial recovery, emergency mode
    without manifest, NFC/Windows name handling
-9. **UI, part 1 – sender:** plain-language texts and error catalogue, role-specific
-   main window with drop zone and delivery cards, settings window, sender name
-   in the manifest, drop onto the window, single files (U1–U4, U9, U20)
-10. **UI, part 2 – receiver:** automatic receiving into the inbox, delivery list
-    with sender name, upload progress from the packet count (U5, U6, U21)
-11. **Back channel:** receiver status and receipt in the delivery folder,
-    "arrived" on the sender, automatic re-send of missing parts, guided clean-up
-    (U10–U12)
-12. **Upload status:** spike on the macOS File Provider upload state; keep awake
-    until uploaded; time estimates (U13, U14)
-13. **Installation:** install script (quarantine, role, sender name, Drive folder),
-    start at login on the receiver Mac (U15, U16)
+9. **UI, part 1 – mode switch and sending:** plain-language texts and error
+   catalogue, main window with mode switch *Senden | Empfangen* (remembered),
+   drop zone and delivery cards, settings window, sender name in the manifest,
+   drop onto the window, single files (U1–U4, U9, U20)
+10. **UI, part 2 – receiving:** automatic receiving into the inbox, delivery list
+    with sender name, incoming progress from the packet count, free up Drive space
+    (U5, U6, U12, U21)
+11. **Installation:** install script (quarantine flag, Drive folder, sender name),
+    optional start at login (U15, U16)
