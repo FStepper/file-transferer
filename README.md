@@ -35,6 +35,9 @@ How unpacking stays safe:
 - **Interrupted?** (cancelled, crash, Mac switched off) Start receiving again and
   pick the same destination. Finished files are skipped, the rest is completed.
 - Before anything is written, the app checks that there is **enough free space**.
+- Packets are downloaded and verified **in parallel**, a few stripes ahead of the
+  one being unpacked. A packet that hangs (e.g. a Drive placeholder that does not
+  download) is skipped after 5 minutes and replaced by parity.
 - At the end, `VidTransfer-Report.txt` in the restored folder lists every file with
   its size and SHA-256.
 

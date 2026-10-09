@@ -94,16 +94,28 @@ v1 transfers remain readable. The receiver detects the format via
    - **Quick status** from headers and file sizes only: how many stripes are
      complete, repairable or still missing. It is shown in the GUI log before
      reading starts.
-3. **Fetch packets (prefetch, phase 6):** a thread pool (4 threads) reads the
-   packets of the next 2–3 stripes ahead. In Drive's "Stream files" mode, this is
-   exactly what triggers the download, in parallel instead of file by file. The
-   SHA-256 is checked along the way (hashlib releases the GIL, so several cores
-   are used).
-   - Data packets are read first. Parity packets are only touched if a data packet
-     is missing or damaged. This saves downloads. ✔
-   - **Timeout per packet:** if there is no progress for 5 min (stuck
-     placeholder), the packet counts as missing for now. If parity is available,
-     work continues with it; otherwise it is retried later.
+3. **Fetch packets (prefetch):** ✔ a pool of 4 daemon threads (`prefetch.py`)
+   reads and hashes the packets of the current stripe and the next 2 stripes
+   ahead. In Drive's "Stream files" mode, this is exactly what triggers the
+   download, in parallel instead of file by file. hashlib releases the GIL, so
+   several cores are used.
+   - Data packets are read first. Parity packets are only requested for data
+     packets that are missing, damaged or stalled. This saves downloads.
+   - **Timeout per packet:** a read that makes no progress for 5 min (stuck
+     placeholder) counts as *stalled*. The stripe continues with parity, and a
+     replacement worker is started (up to 16 threads) so the queue keeps moving.
+     The stalled read cannot be interrupted, but if it finishes later, its result
+     is used.
+   - **Cache:** results are kept per packet and reused as long as the file is
+     unchanged (size + mtime). If Drive syncs a new version, the packet is
+     checked again. `verify` therefore hashes every packet exactly once.
+   - **Transient read errors:** a packet that fails is read once more before
+     the stripe gives up. Background: on the development PC, cold reads
+     occasionally returned single flipped bits (reproduced with a stdlib-only
+     test, most likely the RAM configuration). VidTransfer never produced wrong
+     output, because every error was caught by the packet, zstd or file hashes.
+     The re-read now also avoids needless failures. A stream that still decodes
+     wrongly raises a `TransferError`, and receiving again resumes.
 4. **Assemble the stripe:** ✔ with k valid data packets they are read directly,
    otherwise zfec reconstructs the stripe (in 1 MiB slices, little RAM). With
    fewer than k valid packets, the receiver waits (upload still running / Drive
@@ -198,7 +210,12 @@ offered after asking:
 - ✔ Not enough free space → clear message, nothing left behind
 - ✔ Malicious paths (`../x`, absolute, drive letter, internal names) → rejected
 - ✔ Report contains every file and hash; no leftovers (`.vtpart`, state file) after success
-- Hanging packet (simulated blocking read) → timeout, parity is used (phase 6)
+- ✔ Checks run in parallel; parity is only read when needed
+- ✔ Hanging packet (simulated blocking read) → timeout, parity is used; more
+  stalled reads than workers do not block the queue; too many → clear error
+- ✔ Transient read errors (packet fails once) → re-read succeeds, also in `verify`
+- ✔ Misread stream → `TransferError`, the next receive resumes and succeeds
+- ✔ `verify` hashes every packet only once; changed packets are checked again
 - m+1 losses → partial recovery: all unaffected files correct, report correct (phase 8)
 - All manifests deleted → emergency scan finds all records (phase 8)
 - v1 transfer still readable after the v2 switch (phase 7)
@@ -211,7 +228,8 @@ offered after asking:
 4. ✔ PyInstaller `.app` (arm64 + x86_64) via build script and GitHub Actions
 5. ✔ **Unpacking, part 1:** free-space check, atomic per-file writes, state file +
    resume, receive report, `verify`, GUI buttons „Nur prüfen“ / „Im Finder zeigen“
-6. **Unpacking, part 2:** prefetch pool with parallel verification and timeout
+6. ✔ **Unpacking, part 2:** prefetch pool with parallel verification, stall
+   timeout, result cache, re-read on failure
 7. **Container v2:** record format, per-file compression, index in the manifest
    (incremental), v1 stays readable
 8. **Unpacking, part 3 (needs v2):** jump on resume, `--only`, `list`, partial
