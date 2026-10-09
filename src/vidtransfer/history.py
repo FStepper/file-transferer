@@ -19,6 +19,7 @@ MAX_ENTRIES = 100
 # Delivery states
 QUEUED, RUNNING, DONE, PAUSED, INCOMPLETE, FAILED = (
     "queued", "running", "done", "paused", "incomplete", "failed")
+OFFERED = "offered"     # found in Drive, not received automatically (older, or sent from this computer)
 ACTIVE = (QUEUED, RUNNING)
 
 
@@ -41,6 +42,7 @@ class Delivery:
     size: int = 0
     files: int = 0
     sender: Optional[str] = None
+    transfer_id: Optional[str] = None
     result: Optional[str] = None                # send: delivery folder in Drive; receive: restored folder
     options: dict = field(default_factory=dict)  # receive options (salvage, without_manifest)
     created: str = field(default_factory=now_iso)
@@ -95,3 +97,30 @@ class History:
         self.items = [d for d in self.items if d.state not in (DONE,)]
         self.save()
         return before - len(self.items)
+
+
+class Seen:
+    """Transfer IDs of deliveries that automatic receiving has already handled.
+
+    Kept separately from the list, so removing a card never makes the app fetch
+    the same delivery again.
+    """
+
+    def __init__(self, path: Path):
+        self.path = path
+        try:
+            self.ids: set[str] = set(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError, TypeError):
+            self.ids = set()
+
+    def __contains__(self, transfer_id: str) -> bool:
+        return transfer_id in self.ids
+
+    def add(self, *transfer_ids: str) -> None:
+        new = set(transfer_ids) - self.ids
+        if new:
+            self.ids |= new
+            try:
+                atomic_write_bytes(self.path, json.dumps(sorted(self.ids)).encode("utf-8"))
+            except OSError:
+                log.exception("Could not save the list of received deliveries")

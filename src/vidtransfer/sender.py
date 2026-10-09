@@ -36,7 +36,7 @@ from vidtransfer.manifest import (
 )
 from vidtransfer.packet import PacketHeader, read_header, verify_packet
 from vidtransfer.util import (
-    Cancelled, ProgressFn, atomic_write_bytes, check_cancel, human_bytes, null_progress,
+    Cancelled, ProgressFn, atomic_write_bytes, check_cancel, human_bytes, null_progress, replace,
 )
 
 log = logging.getLogger(__name__)
@@ -243,7 +243,7 @@ def _publish(packet: Path, hdr: PacketHeader, target: Path) -> bool:
         return False
     tmp = target / f".{packet.name}.tmp"
     shutil.copyfile(packet, tmp)
-    os.replace(tmp, dest)
+    replace(tmp, dest)
     packet.unlink()
     return True
 

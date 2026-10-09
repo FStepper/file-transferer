@@ -204,7 +204,7 @@ def test_finished_jobs_update_cards(app, tmp_path):
     status = a._card(d).status.cget("text")
     assert status.startswith("Wird vorbereitet – 50 %") and "Stripe" not in status
 
-    result = SimpleNamespace(target=target / "Drehtag 3", source_bytes=100, files=[{}, {}])
+    result = SimpleNamespace(target=target / "Drehtag 3", source_bytes=100, files=[{}, {}], transfer_id="t1")
     a._on_finished(job, result, None)
     assert d.state == DONE and a._card(d).status.cget("text").startswith("✔ Liegt in Google Drive")
     assert not a._card(d).button.winfo_ismapped()

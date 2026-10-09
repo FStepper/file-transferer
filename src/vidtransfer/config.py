@@ -46,6 +46,8 @@ class Config:
     sender_name: Optional[str] = None         # shown to the receiver; default: computer name
     drive_root: Optional[str] = None          # target folder for sending (Google Drive or a local test folder)
     receive_dir: Optional[str] = None         # inbox for received deliveries (default: desktop.default_inbox())
+    auto_receive: bool = True                 # mode "Empfangen" fetches new deliveries by itself
+    auto_initialized: bool = False            # deliveries already in Drive were offered once
     last_send_dir: Optional[str] = None       # folder last opened in the "send folder" dialog
     last_transfer_dir: Optional[str] = None   # folder last opened in the "receive"/"verify" dialogs
     k: int = 10
@@ -90,6 +92,9 @@ class Config:
 
     def history_path(self) -> Path:
         return config_dir() / "history.json"
+
+    def seen_path(self) -> Path:
+        return config_dir() / "received.json"
 
     def send_options(self) -> SendOptions:
         return SendOptions(k=self.k, m=self.m, block_size=self.block_mib * MIB, zstd_level=self.zstd_level)

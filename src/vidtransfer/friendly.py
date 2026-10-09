@@ -29,6 +29,8 @@ ACTIONS = {
     "open_privacy": "Zugriff erlauben …",
     "salvage": "Alles andere jetzt holen",
     "fetch_missing": "Fehlende Dateien holen",
+    "choose_drive": "Google-Drive-Ordner wählen …",
+    "receive_now": "Empfangen",
 }
 
 
@@ -85,9 +87,16 @@ class Eta:
         return remaining((total - done) * elapsed / progressed)
 
 
-def running_text(kind: str, done: int, total: int, msg: str, eta: Eta) -> str:
-    """Status line while a job is running (the engine's technical message is not shown)."""
+def running_text(kind: str, done: int, total: int, msg: str, eta: Eta,
+                 incoming: Optional[int] = None) -> str:
+    """Status line while a job is running (the engine's technical message is not shown).
+
+    `incoming`: how much of the delivery has arrived in the Drive folder (percent),
+    shown while receiving waits for the rest.
+    """
     if kind == "receive" and msg.startswith("Warte"):
+        if incoming is not None and incoming < 100:
+            return f"Wird noch hochgeladen ({incoming} %) – wird empfangen, sobald es da ist …"
         return "Wartet auf Google Drive – die Lieferung ist noch nicht vollständig da …"
     verb = "Wird vorbereitet" if kind == "send" else "Wird empfangen"
     if total <= 0:

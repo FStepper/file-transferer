@@ -29,6 +29,23 @@ def sleep_cancellable(seconds: float, cancel: Optional[threading.Event]) -> None
         time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
 
 
+def replace(src: Path, dst: Path, attempts: int = 50, delay: float = 0.1) -> None:
+    """`os.replace` that tolerates a destination that is briefly open elsewhere.
+
+    On Windows, replacing a file fails with "access denied" while another
+    process (e.g. the Google Drive client uploading it, or a receiver reading
+    the manifest) has it open. That only lasts moments, so retry for up to ~5 s.
+    """
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+
+
 def atomic_write_bytes(path: Path, data: bytes) -> None:
     """Write to a temporary file first, then rename.
 
@@ -39,7 +56,7 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
         f.write(data)
         f.flush()
         os.fsync(f.fileno())
-    os.replace(tmp, path)
+    replace(tmp, path)
 
 
 def free_space(path: Path) -> int:
