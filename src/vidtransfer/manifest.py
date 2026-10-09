@@ -63,4 +63,12 @@ def format_version(man: dict) -> int:
 
 
 def is_transfer_folder(folder: Path) -> bool:
-    return folder.is_dir() and any((folder / n).exists() for n in MANIFEST_NAMES)
+    """A folder with a manifest – or at least packets (emergency recovery)."""
+    if not folder.is_dir():
+        return False
+    if any((folder / n).exists() for n in MANIFEST_NAMES):
+        return True
+    try:
+        return any(p.suffix == ".vtp" for p in folder.iterdir())
+    except OSError:
+        return False

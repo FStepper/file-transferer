@@ -1,4 +1,4 @@
-"""Receiver: verify packets → reconstruct if needed → zstd → tar → files.
+"""Receiver: verify packets → reconstruct if needed → records (v2) / tar (v1) → files.
 
 Stripes are processed in order. If something is still missing for a stripe
 (Drive is still syncing, or the sender is still uploading), the receiver waits
@@ -9,14 +9,24 @@ Unpacking is crash-safe and resumable:
 - everything is written into "<name> (receiving)" first and only renamed to
   "<name>" once every file has been verified;
 - each file is written as ".<name>.vtpart" and only gets its real name once its
-  SHA-256 matches the manifest, so a half-written or corrupt file never appears
-  under its real name;
+  SHA-256 matches, so a half-written or corrupt file never appears under its
+  real name;
 - ".vidtransfer-state.json" records finished files, so an interrupted receive
   continues where it stopped (finished files are not written again).
+
+With format v2 and a complete manifest index, files are processed "targeted":
+the receiver jumps from file to file via the index. That is the basis for
+restoring single files (`only`) and for partial recovery (`salvage`): if a
+stripe is lost for good, only the files that touch it are missing; the result
+goes to "<name> (incomplete)" and can be completed later by receiving again.
+Without any manifest (`without_manifest`), a stand-in manifest is built from
+the packet headers and the records are read sequentially; after damage, the
+reader re-synchronises on the next valid record header.
 """
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import logging
@@ -28,17 +38,19 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Optional
 
 import zstandard
 
 from vidtransfer import __version__
-from vidtransfer.container import T_END, T_DIR, T_FILE, ContainerError, RecordReader
+from vidtransfer.container import T_DIR, T_END, T_FILE, ContainerError, RecordHeader, RecordReader
 from vidtransfer.erasure import decode_stripe
 from vidtransfer.manifest import STATUS_COMPLETE, format_version, read_manifest
+from vidtransfer.names import NameMapper
 from vidtransfer.packet import HEADER_SIZE, data_len, packet_name, parse_packet_name, read_header
 from vidtransfer.prefetch import LOOKAHEAD, PacketVerifier, StripeCheck
+from vidtransfer.recovery import synthesize_manifest
 from vidtransfer.util import (
     Cancelled, ProgressFn, atomic_write_bytes, check_cancel, free_space, human_bytes,
     human_duration, null_progress, sleep_cancellable, unique_path,
@@ -47,10 +59,12 @@ from vidtransfer.util import (
 log = logging.getLogger(__name__)
 
 POLL_SECONDS = 20
+GIVE_UP_SECONDS = 600     # upload complete but a stripe stays short this long → report it
 COPY_CHUNK = 1 << 20
 SPACE_RESERVE = 1.05
 
 RECEIVING_SUFFIX = " (receiving)"
+INCOMPLETE_SUFFIX = " (incomplete)"
 STATE_NAME = ".vidtransfer-state.json"
 WORK_DIR_NAME = ".vidtransfer-work"
 PART_SUFFIX = ".vtpart"
@@ -66,6 +80,15 @@ class InsufficientSpaceError(TransferError):
     pass
 
 
+class StripeUnavailableError(TransferError):
+    """Fewer than k valid packets for a stripe (and no more waiting)."""
+
+    def __init__(self, stripe: int, valid: int, needed: int, upload_complete: bool):
+        super().__init__(f"Stripe {stripe + 1}: nur {valid} von mindestens {needed} gültigen Paketen vorhanden")
+        self.stripe = stripe
+        self.upload_complete = upload_complete
+
+
 @dataclass
 class ReceiveResult:
     dest: Path
@@ -75,6 +98,12 @@ class ReceiveResult:
     resumed: bool = False
     skipped_files: int = 0
     report: Optional[Path] = None
+    complete: bool = True                               # False: some files could not be restored
+    missing: list[str] = field(default_factory=list)    # files that could not be restored
+    lost_stripes: list[int] = field(default_factory=list)
+    renamed: dict[str, str] = field(default_factory=dict)
+    selected: bool = False                              # only some files were requested
+    without_manifest: bool = False
 
 
 @dataclass
@@ -152,7 +181,7 @@ def transfer_status(folder: Path) -> tuple[Optional[dict], list[StripeStatus]]:
 # ---------------------------------------------------------------- stripe data source
 
 class _StripeStream:
-    """Provides the (compressed) data stream stripe by stripe as a readable object.
+    """Provides the data stream stripe by stripe as a readable object.
 
     Packets are verified by a `PacketVerifier` in background threads; the next
     `LOOKAHEAD` stripes are prefetched while the current one is being unpacked.
@@ -165,13 +194,13 @@ class _StripeStream:
     """
 
     def __init__(self, folder: Path, work: Path, progress: ProgressFn, cancel, wait: bool,
-                 verifier: Optional[PacketVerifier] = None):
+                 verifier: Optional[PacketVerifier] = None, manifest: Optional[dict] = None):
         self.folder = folder
         self.work = work
         self.progress = progress
         self.cancel = cancel
         self.wait = wait
-        self.manifest = read_manifest(folder)
+        self.manifest = manifest or read_manifest(folder)
         p = self.manifest["params"]
         self.k, self.m = p["k"], p["m"]
         self._own_verifier = verifier is None
@@ -212,6 +241,7 @@ class _StripeStream:
 
     def _load_stripe(self, s: int) -> bool:
         """Prepare stripe `s` for reading. False = end of stream."""
+        stuck_since: Optional[float] = None
         while True:
             check_cancel(self.cancel)
             self._refresh_manifest()
@@ -258,13 +288,19 @@ class _StripeStream:
                 self.verifier.forget_before(s)
                 return True
 
+            complete = self._complete()
             if not self.wait:
-                raise TransferError(
-                    f"Stripe {s + 1}: nur {len(valid)} von mindestens {self.k} gültigen Paketen vorhanden")
-            if self._complete():
+                raise StripeUnavailableError(s, len(valid), self.k, complete)
+            if complete:
+                stuck_since = stuck_since or time.monotonic()
+                if time.monotonic() - stuck_since >= GIVE_UP_SECONDS:
+                    log.warning("Stripe %d still has only %d/%d valid packets after %.0f s - giving up",
+                                s, len(valid), self.k, GIVE_UP_SECONDS)
+                    raise StripeUnavailableError(s, len(valid), self.k, True)
                 hint = ("Upload abgeschlossen, aber Pakete fehlen/sind defekt – Drive synchronisiert "
                         "evtl. noch. Notfalls auf dem Sender denselben Ordner erneut senden (repariert).")
             else:
+                stuck_since = None
                 hint = "Sender lädt noch hoch"
             self._report(f"Warte auf Stripe {s + 1} ({len(valid)}/{self.k} Pakete) – {hint}")
             log.info("Waiting for stripe %d (%d/%d valid)", s, len(valid), self.k)
@@ -322,6 +358,8 @@ class _StripeStream:
                 self._fh.close()
                 self._fh = None
             self._remaining = 0
+            self._segments = []
+            self._eof = False
             self.stripe = target // self.stripe_bytes
             self._skip_in_stripe = target - self.stripe * self.stripe_bytes
         self.pos = target
@@ -334,8 +372,14 @@ class _StripeStream:
             size = 1 << 30
         out = bytearray()
         while len(out) < size:
-            if self._remaining == 0 and not self._next_segment():
-                break
+            if self._remaining == 0:
+                try:
+                    more = self._next_segment()
+                except BaseException:
+                    self.pos += len(out)    # keep pos in sync with what was consumed
+                    raise
+                if not more:
+                    break
             chunk = self._fh.read(min(size - len(out), self._remaining))
             if not chunk:
                 raise TransferError("Paket wurde während des Lesens verändert")
@@ -363,65 +407,90 @@ def _open_tar(stream: _StripeStream, man: dict):
 # ---------------------------------------------------------------- receive state
 
 class _ReceiveState:
-    """Progress of a receive, stored inside the "(receiving)" folder."""
+    """Progress of a receive, stored inside the working folder."""
 
-    def __init__(self, folder: Path, transfer_id: str, done=None, pending=None):
+    def __init__(self, folder: Path, transfer_id: str, done=None, pending=None, names=None):
         self.folder = folder
         self.transfer_id = transfer_id
         # rel path -> {"size", "sha256", "mtime"}
         self.done: dict[str, dict] = done or {}      # verified, under the real name
-        self.pending: dict[str, dict] = pending or {}  # written as .vtpart, hash not yet known
+        self.pending: dict[str, dict] = pending or {}  # v1: written as .vtpart, hash not yet known
+        self.names = NameMapper(names)               # transferred path -> local path
 
     @classmethod
     def load(cls, folder: Path) -> Optional["_ReceiveState"]:
         try:
             raw = json.loads((folder / STATE_NAME).read_text(encoding="utf-8"))
-            return cls(folder, raw["transfer_id"], raw.get("done") or {}, raw.get("pending") or {})
+            return cls(folder, raw["transfer_id"], raw.get("done") or {}, raw.get("pending") or {},
+                       raw.get("names") or {})
         except (OSError, ValueError, KeyError, TypeError):
             return None
 
     def save(self) -> None:
         raw = {"transfer_id": self.transfer_id, "app_version": __version__,
-               "done": self.done, "pending": self.pending}
+               "done": self.done, "pending": self.pending, "names": self.names.mapping}
         atomic_write_bytes(self.folder / STATE_NAME, json.dumps(raw, ensure_ascii=False).encode("utf-8"))
+
+    def target(self, root: Path, rel: str) -> Optional[Path]:
+        if not rel or rel.split("/", 1)[0] in _INTERNAL_NAMES:
+            return None
+        return self.names.target(root, rel)
 
 
 def _prepare_destination(dest_parent: Path, man: dict) -> tuple[Path, Path, _ReceiveState, bool]:
-    """Return (final folder, working folder, state, resumed)."""
+    """Return (final folder, working folder, state, resumed).
+
+    A "(receiving)" or "(incomplete)" folder of the same transfer is resumed.
+    """
     name, tid = man["name"], man["transfer_id"]
     i = 1
     while True:
         final = dest_parent / (name if i == 1 else f"{name} ({i})")
-        partial = final.with_name(final.name + RECEIVING_SUFFIX)
         i += 1
-        if partial.is_dir():
-            state = _ReceiveState.load(partial)
-            if state and state.transfer_id == tid:
-                return final, partial, state, True
+        candidates = [final.with_name(final.name + sfx) for sfx in (RECEIVING_SUFFIX, INCOMPLETE_SUFFIX)]
+        for partial in candidates:
+            if partial.is_dir():
+                state = _ReceiveState.load(partial)
+                if state and state.transfer_id == tid:
+                    return final, partial, state, True
+        if final.exists() or any(c.exists() for c in candidates):
             continue
-        if partial.exists() or final.exists():
-            continue
+        partial = candidates[0]
         partial.mkdir()
         state = _ReceiveState(partial, tid)
         state.save()
         return final, partial, state, False
 
 
-def _required_space(man: dict, state: _ReceiveState) -> int:
+def _select(man: dict, patterns: list[str]) -> list[str]:
+    """Paths (in stream order) matching any pattern: glob on the path or the file name,
+    or a folder prefix. Case-insensitive, "/" or "\\" as separator."""
+    pats = [p.replace("\\", "/").strip().casefold() for p in patterns if p.strip()]
+    out = []
+    for f in man["files"]:
+        path = f["path"].casefold()
+        name = path.rsplit("/", 1)[-1]
+        if any(fnmatch.fnmatchcase(path, p) or fnmatch.fnmatchcase(name, p)
+               or path.startswith(p.rstrip("/") + "/") for p in pats):
+            out.append(f["path"])
+    return out
+
+
+def _required_space(man: dict, state: _ReceiveState, selected: Optional[set[str]]) -> int:
     p = man["params"]
     remaining = sum(f["size"] for f in man["files"]
-                    if f["path"] not in state.done and f["path"] not in state.pending)
+                    if f["path"] not in state.done and f["path"] not in state.pending
+                    and (selected is None or f["path"] in selected))
     return int((remaining + p["k"] * p["block_size"]) * SPACE_RESERVE)
 
 
-# ---------------------------------------------------------------- unpacking
+# ---------------------------------------------------------------- unpacking helpers
 
 def _safe_target(root: Path, name: str) -> Optional[Path]:
-    pp = PurePosixPath(name)
-    if (not pp.parts or pp.is_absolute() or any(part in ("..", "") for part in pp.parts)
-            or ":" in pp.parts[0] or pp.parts[0] in _INTERNAL_NAMES):
+    """Local path for a transferred path (without collision handling), None if unsafe."""
+    if not name or name.split("/", 1)[0] in _INTERNAL_NAMES:
         return None
-    return root.joinpath(*pp.parts)
+    return NameMapper().target(root, name)
 
 
 def _part_path(target: Path) -> Path:
@@ -440,30 +509,145 @@ def _expected_hashes(man: dict) -> dict[str, str]:
     return {f["path"]: f["sha256"] for f in man.get("files", []) if "sha256" in f}
 
 
+def _drop_changed(state: _ReceiveState, partial: Path) -> None:
+    """Forget finished files that were changed or removed in the meantime (they are written again)."""
+    for rel, entry in list(state.done.items()):
+        target = state.target(partial, rel)
+        if target is None or not _unchanged(target, entry):
+            del state.done[rel]
+
+
+def _write_file(reader: RecordReader, rec: RecordHeader, target: Path, expected: Optional[str]) -> dict:
+    """Write one v2 file record atomically (.vtpart → real name after the hash check)."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    part = _part_path(target)
+    try:
+        with open(part, "wb") as out:
+            sha = reader.read_data(rec, out.write)
+            out.flush()
+            os.fsync(out.fileno())
+        if expected and expected != sha:
+            raise ContainerError(f"„{rec.path}“: Prüfsumme passt nicht zum Manifest")
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
+    os.utime(part, (rec.mtime, rec.mtime))
+    os.replace(part, target)
+    return {"size": rec.size, "sha256": sha, "mtime": int(rec.mtime)}
+
+
+def _misread(exc: Exception) -> TransferError:
+    # Every packet passed its SHA-256 check, so the data was most likely read
+    # incorrectly (transient I/O or memory error). Finished files are kept.
+    log.error("Stream could not be decoded: %s", exc)
+    return TransferError(f"Datenstrom fehlerhaft gelesen ({exc}). Bitte erneut empfangen – "
+                         "fertige Dateien bleiben erhalten.")
+
+
 @dataclass
 class _UnpackStats:
     written: int = 0
     skipped: int = 0
     dir_mtimes: list = field(default_factory=list)
+    failed: list = field(default_factory=list)        # files that could not be restored
+    lost_stripes: set = field(default_factory=set)
+    unknown_damage: bool = False                       # damage where no file name is known
 
 
-def _unpack(stream: _StripeStream, partial: Path, state: _ReceiveState,
-            progress: ProgressFn, cancel) -> _UnpackStats:
-    if format_version(stream.manifest) >= 2:
-        return _unpack_records(stream, partial, state, progress, cancel)
-    return _unpack_tar(stream, partial, state, progress, cancel)
+def _unpack(stream: _StripeStream, partial: Path, state: _ReceiveState, progress: ProgressFn,
+            cancel, selected: Optional[list[str]], salvage: bool) -> _UnpackStats:
+    man = stream.manifest
+    if format_version(man) < 2:
+        return _unpack_tar(stream, partial, state, progress, cancel)
+    indexed = man["files"] and all("offset" in f for f in man["files"])
+    if selected is not None or (indexed and not man.get("synthetic")):
+        paths = selected if selected is not None else [f["path"] for f in man["files"]]
+        return _unpack_targeted(stream, partial, state, progress, cancel, paths, salvage)
+    return _unpack_sequential(stream, partial, state, progress, cancel, salvage)
 
+
+# ---------------------------------------------------------------- v2: targeted (via the index)
+
+def _index_entry(stream: _StripeStream, path: str, cancel) -> dict:
+    """Manifest entry with offset for `path`; waits while the sender is still indexing."""
+    while True:
+        entry = next((f for f in stream.manifest["files"] if f["path"] == path), None)
+        if entry is None:
+            raise TransferError(f"„{path}“ steht nicht im Manifest")
+        if "offset" in entry:
+            return entry
+        if not stream.wait:
+            raise TransferError(f"„{path}“ ist noch nicht übertragen")
+        stream.progress(stream.consumed, stream.total(), f"Warte, bis „{path}“ übertragen ist …")
+        sleep_cancellable(POLL_SECONDS, cancel)
+        stream._refresh_manifest()
+
+
+def _unpack_targeted(stream: _StripeStream, partial: Path, state: _ReceiveState, progress: ProgressFn,
+                     cancel, paths: list[str], salvage: bool) -> _UnpackStats:
+    """Jump from file to file via the index. With `salvage`, lost stripes only cost
+    the files that touch them."""
+    stats = _UnpackStats()
+    reader = RecordReader(stream, cancel)
+    S = stream.stripe_bytes
+    _drop_changed(state, partial)
+    try:
+        for path in paths:
+            check_cancel(cancel)
+            if path in state.done:
+                stats.skipped += 1
+                continue
+            entry = _index_entry(stream, path, cancel)
+            stripes = range(entry["offset"] // S, (entry["offset"] + entry["length"] - 1) // S + 1)
+            if salvage and any(s in stats.lost_stripes for s in stripes):
+                stats.failed.append(path)
+                continue
+            target = state.target(partial, path)
+            if target is None:
+                log.warning("Skipping unsafe path: %r", path)
+                stats.failed.append(path)
+                continue
+            try:
+                if entry["offset"] < reader.pos:      # only after an error inside this stripe
+                    raise ContainerError("Position bereits überschritten")
+                reader.skip_to(entry["offset"])
+                rec = reader.next()
+                if rec.type != T_FILE or rec.path != path:
+                    raise ContainerError(f"Index passt nicht zum Datenstrom bei „{path}“")
+                state.done[path] = _write_file(reader, rec, target, entry.get("sha256"))
+            except StripeUnavailableError as exc:
+                if not salvage:
+                    raise
+                log.warning("Stripe %d is lost - %s cannot be restored", exc.stripe, path)
+                stats.lost_stripes.add(exc.stripe)
+                stats.failed.append(path)
+                reader.reset()
+                continue
+            except ContainerError as exc:
+                if not salvage:
+                    raise _misread(exc) from exc
+                log.warning("%s could not be restored: %s", path, exc)
+                stats.failed.append(path)
+                reader.reset()
+                continue
+            state.save()
+            stats.written += 1
+            progress(stream.consumed, stream.total(), f"Entpackt: {path}")
+    finally:
+        state.save()
+    log.info("Loaded %d stripe(s) for this receive", stream.loaded_stripes)
+    return stats
+
+
+# ---------------------------------------------------------------- v2: sequential
 
 def _resume_position(man: dict, partial: Path, state: _ReceiveState) -> tuple[int, int]:
-    """(stream position to start at, number of finished files before it) – v2 only.
+    """(stream position to start at, number of finished files before it).
 
     Finished files that were changed or removed in the meantime are dropped from
     the state first, so they are written again.
     """
-    for rel, entry in list(state.done.items()):
-        target = _safe_target(partial, rel)
-        if target is None or not _unchanged(target, entry):
-            del state.done[rel]
+    _drop_changed(state, partial)
     pos, skipped = 0, 0
     for f in man["files"]:                       # manifest order == stream order
         if f["path"] not in state.done:
@@ -475,28 +659,55 @@ def _resume_position(man: dict, partial: Path, state: _ReceiveState) -> tuple[in
     return pos, skipped
 
 
-def _unpack_records(stream: _StripeStream, partial: Path, state: _ReceiveState,
-                    progress: ProgressFn, cancel) -> _UnpackStats:
-    """Format v2: each file is verified via its trailer as soon as it is complete."""
+def _resync(reader: RecordReader, stream: _StripeStream, start: int, stats: _UnpackStats) -> bool:
+    """Continue at the next valid record header at or after `start`, skipping lost stripes."""
+    while True:
+        try:
+            return reader.resync(max(start, stream.pos))
+        except StripeUnavailableError as exc:
+            stats.lost_stripes.add(exc.stripe)
+            start = (exc.stripe + 1) * stream.stripe_bytes
+
+
+def _unpack_sequential(stream: _StripeStream, partial: Path, state: _ReceiveState,
+                       progress: ProgressFn, cancel, salvage: bool) -> _UnpackStats:
+    """Read the records in order: while the sender is still indexing, or without manifest."""
     stats = _UnpackStats()
     reader = RecordReader(stream, cancel)
     index_for, index = None, {}
+    S = stream.stripe_bytes
 
     start, stats.skipped = _resume_position(stream.manifest, partial, state)
     if start:
         log.info("Resuming at stream position %d (%d finished file(s) skipped)", start, stats.skipped)
         progress(start, stream.total(), f"Springe zu Position {human_bytes(start)} "
                                         f"({stats.skipped} Datei(en) bereits fertig) …")
-        stream.skip_to(start)
+        reader.skip_to(start)
     try:
         while True:
             check_cancel(cancel)
-            rec = reader.next()
+            try:
+                rec = reader.next()
+            except StripeUnavailableError as exc:
+                if not salvage:
+                    raise
+                stats.lost_stripes.add(exc.stripe)
+                stats.unknown_damage = True
+                if not _resync(reader, stream, (exc.stripe + 1) * S, stats):
+                    break
+                continue
+            except ContainerError as exc:
+                if not salvage:
+                    raise _misread(exc) from exc
+                stats.unknown_damage = True
+                if not _resync(reader, stream, stream.pos, stats):
+                    break
+                continue
             if rec.type == T_END:
                 break
             if index_for is not stream.manifest:
                 index_for, index = stream.manifest, {f["path"]: f for f in stream.manifest["files"]}
-            target = _safe_target(partial, rec.path)
+            target = state.target(partial, rec.path)
             if target is None:
                 log.warning("Skipping unsafe path: %r", rec.path)
                 if rec.type == T_FILE:
@@ -504,6 +715,7 @@ def _unpack_records(stream: _StripeStream, partial: Path, state: _ReceiveState,
                 continue
             if rec.type == T_DIR:
                 target.mkdir(parents=True, exist_ok=True)
+                stats.dir_mtimes.append((target, rec.mtime))
                 continue
 
             rel = rec.path
@@ -513,33 +725,33 @@ def _unpack_records(stream: _StripeStream, partial: Path, state: _ReceiveState,
                 reader.skip_data(rec, entry.get("length"))
                 continue
             state.done.pop(rel, None)
-
-            target.parent.mkdir(parents=True, exist_ok=True)
-            part = _part_path(target)
-            with open(part, "wb") as out:
-                sha = reader.read_data(rec, out.write)
-                out.flush()
-                os.fsync(out.fileno())
-            os.utime(part, (rec.mtime, rec.mtime))
-            if entry.get("sha256") and entry["sha256"] != sha:
-                part.unlink()
-                raise TransferError(f"Prüfsumme falsch: {rel} – bitte erneut empfangen")
-            os.replace(part, target)
-            state.done[rel] = {"size": rec.size, "sha256": sha, "mtime": int(rec.mtime)}
+            try:
+                state.done[rel] = _write_file(reader, rec, target, entry.get("sha256"))
+            except StripeUnavailableError as exc:
+                if not salvage:
+                    raise
+                stats.lost_stripes.add(exc.stripe)
+                stats.failed.append(rel)
+                if not _resync(reader, stream, (exc.stripe + 1) * S, stats):
+                    break
+                continue
+            except ContainerError as exc:
+                if not salvage:
+                    raise _misread(exc) from exc
+                stats.failed.append(rel)
+                if not _resync(reader, stream, stream.pos, stats):
+                    break
+                continue
             state.save()
             stats.written += 1
             progress(stream.consumed, stream.total(), f"Entpackt: {rel}")
-    except ContainerError as exc:
-        # Every packet passed its SHA-256 check, so the data was most likely read
-        # incorrectly (transient I/O or memory error). Finished files are kept.
-        log.error("Stream could not be decoded: %s", exc)
-        raise TransferError(f"Datenstrom fehlerhaft gelesen ({exc}). Bitte erneut empfangen – "
-                            "fertige Dateien bleiben erhalten.") from exc
     finally:
         state.save()
     log.info("Loaded %d stripe(s) for this receive", stream.loaded_stripes)
     return stats
 
+
+# ---------------------------------------------------------------- v1: tar stream
 
 def _unpack_tar(stream: _StripeStream, partial: Path, state: _ReceiveState,
                 progress: ProgressFn, cancel) -> _UnpackStats:
@@ -550,7 +762,7 @@ def _unpack_tar(stream: _StripeStream, partial: Path, state: _ReceiveState,
     try:
         for member in tar:
             check_cancel(cancel)
-            target = _safe_target(partial, member.name)
+            target = state.target(partial, member.name)
             if target is None:
                 log.warning("Skipping unsafe path: %r", member.name)
                 continue
@@ -605,11 +817,7 @@ def _unpack_tar(stream: _StripeStream, partial: Path, state: _ReceiveState,
             stats.written += 1
             progress(stream.consumed, stream.total(), f"Entpackt: {rel}")
     except (zstandard.ZstdError, tarfile.TarError) as exc:
-        # Every packet passed its SHA-256 check, so the data was most likely read
-        # incorrectly (transient I/O or memory error). Finished files are kept.
-        log.error("Stream could not be decoded: %s", exc)
-        raise TransferError("Datenstrom fehlerhaft gelesen (vermutlich ein vorübergehender Lese- oder "
-                            "Speicherfehler). Bitte erneut empfangen – fertige Dateien bleiben erhalten.") from exc
+        raise _misread(exc) from exc
     finally:
         tar.close()
         if source is not None:
@@ -617,12 +825,17 @@ def _unpack_tar(stream: _StripeStream, partial: Path, state: _ReceiveState,
     return stats
 
 
-def _finalize(partial: Path, state: _ReceiveState, man: dict) -> None:
-    """Check every file against the final manifest and give pending files their real name."""
+# ---------------------------------------------------------------- finishing
+
+def _finalize(partial: Path, state: _ReceiveState, man: dict,
+              selected: Optional[set[str]], failed: set[str]) -> None:
+    """Check every requested file against the final manifest; give pending (v1) files their real name."""
     errors = []
     for f in man["files"]:
         rel = f["path"]
-        target = _safe_target(partial, rel)
+        if (selected is not None and rel not in selected) or rel in failed:
+            continue
+        target = state.target(partial, rel)
         if target is None:
             errors.append(f"unzulässiger Pfad: {rel}")
             continue
@@ -648,28 +861,40 @@ def _finalize(partial: Path, state: _ReceiveState, man: dict) -> None:
                             "betroffenen Dateien neu):\n" + "\n".join(errors[:20]) + more)
 
 
-def _dir_mtimes(partial: Path, man: dict, stats: _UnpackStats) -> list[tuple[Path, int]]:
+def _dir_mtimes(partial: Path, man: dict, state: _ReceiveState, stats: _UnpackStats,
+                selected: Optional[set[str]]) -> list[tuple[Path, int]]:
     """Directories (deepest first) with their original mtime; creates missing ones (v2).
 
     With v2, directory records may have been skipped when resuming, so the
-    manifest is the source of truth (this also covers empty directories).
+    manifest is the source of truth (this also covers empty directories). For a
+    selective restore, only the folders that were created are touched.
     """
-    if format_version(man) < 2:
-        return list(reversed(stats.dir_mtimes))
-    out = []
-    for d in man.get("dirs", []):
-        target = _safe_target(partial, d["path"])
-        if target is not None:
-            target.mkdir(parents=True, exist_ok=True)
-            out.append((target, d["mtime"]))
+    if format_version(man) < 2 or man.get("synthetic"):
+        out = stats.dir_mtimes
+    else:
+        out = []
+        for d in man.get("dirs", []):
+            target = state.target(partial, d["path"])
+            if target is None:
+                continue
+            if selected is None:
+                target.mkdir(parents=True, exist_ok=True)
+            if target.is_dir():
+                out.append((target, d["mtime"]))
     return sorted(out, key=lambda t: len(t[0].parts), reverse=True)
 
 
-def _write_report(dest: Path, man: dict, state: _ReceiveState, repaired: int,
-                  skipped: int, started: datetime, seconds: float) -> Path:
+def _write_report(dest: Path, man: dict, state: _ReceiveState, stream: _StripeStream,
+                  stats: _UnpackStats, selected: Optional[set[str]], started: datetime,
+                  seconds: float) -> Path:
     p = man["params"]
-    files = sorted(man["files"], key=lambda f: f["path"])
+    synthetic = bool(man.get("synthetic"))
+    if synthetic:
+        files = sorted(({"path": k, **v} for k, v in state.done.items()), key=lambda f: f["path"])
+    else:
+        files = sorted((f for f in man["files"] if f["path"] in state.done), key=lambda f: f["path"])
     total = sum(f["size"] for f in files)
+    incomplete = bool(stats.failed or stats.unknown_damage)
     lines = [
         "VidTransfer receive report",
         "==========================",
@@ -679,17 +904,37 @@ def _write_report(dest: Path, man: dict, state: _ReceiveState, repaired: int,
         f"Sent:              {man.get('created_at', '?')}",
         f"Received:          {started.isoformat(timespec='seconds')}",
         f"Duration:          {human_duration(seconds)}",
-        f"Files:             {len(files)} ({human_bytes(total)})",
-        f"Repaired stripes:  {repaired} of {man.get('stripes', '?')}",
-        f"Resumed:           {'yes, ' + str(skipped) + ' file(s) already done' if skipped else 'no'}",
+        f"Files restored:    {len(files)} ({human_bytes(total)})",
+        f"Repaired stripes:  {stream.repaired} of {man.get('stripes', '?')}",
+        f"Resumed:           {'yes, ' + str(stats.skipped) + ' file(s) already done' if stats.skipped else 'no'}",
         f"Parameters:        k={p['k']} m={p['m']} packet={human_bytes(p['block_size'])} "
         f"compression={p['compression']}",
         f"App version:       {__version__}",
         "",
-        "All files were verified with SHA-256.",
-        "",
-        f"{'SHA-256':64}  {'Size':>15}  Path",
     ]
+    if selected is not None:
+        lines += [f"Only selected files were restored ({len(selected)} requested).", ""]
+    if synthetic:
+        lines += ["WARNING: no manifest was available. The transfer was read from the packets alone;",
+                  "every restored file was verified via its own checksum, but it cannot be checked",
+                  "whether files are missing.", ""]
+    if incomplete:
+        lines += ["INCOMPLETE: some parts of the transfer are lost for good.",
+                  f"Lost stripes: {', '.join(str(s + 1) for s in sorted(stats.lost_stripes)) or '?'}"]
+        if stats.failed:
+            lines += [f"Files that could not be restored ({len(stats.failed)}):"]
+            lines += [f"  {path}" for path in sorted(stats.failed)]
+        if stats.unknown_damage:
+            lines += ["Files inside the damaged area may be missing without being listed."]
+        lines += ["To complete it: send the same folder again on the sending side (only missing",
+                  "packets are written), then receive into the same destination again.", ""]
+    renamed = state.names.renamed()
+    if renamed:
+        lines += ["Renamed to fit this system:"]
+        lines += [f"  {src}  ->  {dst}" for src, dst in sorted(renamed.items())]
+        lines += [""]
+    lines += ["All restored files were verified with SHA-256.", "",
+              f"{'SHA-256':64}  {'Size':>15}  Path"]
     lines += [f"{f['sha256']:64}  {f['size']:>15}  {f['path']}" for f in files]
     path = dest / REPORT_NAME
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -712,23 +957,53 @@ def _wait_for_manifest(folder: Path, wait: bool, progress: ProgressFn, cancel,
         sleep_cancellable(POLL_SECONDS, cancel)
 
 
+# ---------------------------------------------------------------- entry point
+
 def receive_folder(
     folder: Path,
     dest_parent: Path,
     progress: ProgressFn = null_progress,
     cancel: Optional[threading.Event] = None,
     wait: bool = True,
+    only: Optional[list[str]] = None,
+    salvage: bool = False,
+    without_manifest: bool = False,
 ) -> ReceiveResult:
+    """Restore a transfer folder into `dest_parent`.
+
+    only:             restore just the files matching these patterns (v2)
+    salvage:          if stripes are lost for good, restore everything else into
+                      "<name> (incomplete)" instead of failing (v2, upload complete)
+    without_manifest: if no manifest is readable, read the packets alone (emergency)
+    """
     started = datetime.now(timezone.utc)
     t0 = time.monotonic()
     folder = Path(folder)
     dest_parent = Path(dest_parent)
 
-    man = _wait_for_manifest(folder, wait, progress, cancel)
+    man = read_manifest(folder)
+    if man is None and without_manifest:
+        man = synthesize_manifest(folder)
+        if man is None:
+            raise TransferError(f"In {folder} wurden keine VidTransfer-Pakete gefunden")
+    elif man is None:
+        man = _wait_for_manifest(folder, wait, progress, cancel)
+    synthetic = bool(man.get("synthetic"))
+    v2 = format_version(man) >= 2
+    if (only or salvage) and not v2:
+        raise TransferError("Einzelne Dateien und Teilrettung gibt es erst für Transfers ab Format 2.")
+    if only and synthetic:
+        raise TransferError("Ohne Manifest gibt es keine Dateiliste – bitte alles wiederherstellen.")
+    if salvage and man.get("status") != STATUS_COMPLETE:
+        raise TransferError("Teilrettung ist erst möglich, wenn der Upload abgeschlossen ist.")
+    selected_list = _select(man, only) if only else None
+    if only and not selected_list:
+        raise TransferError("Keine Datei passt zu: " + ", ".join(only))
+    selected = set(selected_list) if selected_list is not None else None
+
     dest_parent.mkdir(parents=True, exist_ok=True)
     final, partial, state, resumed = _prepare_destination(dest_parent, man)
-
-    need, free = _required_space(man, state), free_space(partial)
+    need, free = _required_space(man, state, selected), free_space(partial)
     if free < need:
         if not resumed:
             shutil.rmtree(partial, ignore_errors=True)
@@ -741,17 +1016,19 @@ def receive_folder(
         log.info("Resuming receive into %s (%d file(s) already done)", partial, n)
         progress(0, 0, f"Setze Empfang fort ({n} Datei(en) bereits fertig) …")
     else:
-        log.info("Receiving %s -> %s", folder, final)
+        log.info("Receiving %s -> %s%s", folder, final, " (without manifest)" if synthetic else "")
 
     work = partial / WORK_DIR_NAME
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir()
-    stream = _StripeStream(folder, work, progress, cancel, wait)
+    stream = _StripeStream(folder, work, progress, cancel, wait=wait and not salvage and not synthetic,
+                           manifest=man)
     try:
-        stats = _unpack(stream, partial, state, progress, cancel)
-        man = _wait_for_manifest(folder, wait, progress, cancel, complete=True, stream=stream)
-        progress(stream.consumed, stream.total(), "Prüfe Dateien …")
-        _finalize(partial, state, man)
+        stats = _unpack(stream, partial, state, progress, cancel, selected_list, salvage or synthetic)
+        if not synthetic:
+            man = _wait_for_manifest(folder, wait, progress, cancel, complete=True, stream=stream)
+            progress(stream.consumed, stream.total(), "Prüfe Dateien …")
+            _finalize(partial, state, man, selected, set(stats.failed))
     except Cancelled:
         log.info("Receive cancelled; it can be resumed from %s", partial)
         raise
@@ -759,23 +1036,38 @@ def receive_folder(
         stream.close()
         shutil.rmtree(work, ignore_errors=True)
 
-    report = _write_report(partial, man, state, stream.repaired, stats.skipped,
-                           started, time.monotonic() - t0)
-    (partial / STATE_NAME).unlink(missing_ok=True)
-    for path, mtime in _dir_mtimes(partial, man, stats):
+    incomplete = bool(stats.failed or stats.unknown_damage)
+    report = _write_report(partial, man, state, stream, stats, selected, started, time.monotonic() - t0)
+    for path, mtime in _dir_mtimes(partial, man, state, stats, selected):
         os.utime(path, (mtime, mtime))
-    if final.exists():
-        final = unique_path(final)
-    os.replace(partial, final)
 
-    total_bytes = sum(f["size"] for f in man["files"])
-    msg = (f"Fertig: {len(man['files'])} Dateien ({human_bytes(total_bytes)}) geprüft"
-           + (f", {stream.repaired} Stripe(s) repariert" if stream.repaired else ""))
+    if incomplete:
+        # Keep the state so a later receive into the same destination can complete it
+        dest = final.with_name(final.name + INCOMPLETE_SUFFIX)
+        if partial != dest:
+            if dest.exists():
+                dest = unique_path(dest)
+            os.replace(partial, dest)
+    else:
+        (partial / STATE_NAME).unlink(missing_ok=True)
+        dest = final if not final.exists() else unique_path(final)
+        os.replace(partial, dest)
+
+    done_files = [f for f in man["files"] if f["path"] in state.done] if not synthetic else \
+        [{"size": v["size"]} for v in state.done.values()]
+    total_bytes = sum(f["size"] for f in done_files)
+    msg = (f"Fertig: {len(done_files)} Dateien ({human_bytes(total_bytes)}) geprüft"
+           + (f", {stream.repaired} Stripe(s) repariert" if stream.repaired else "")
+           + (f", {len(stats.failed)} Datei(en) nicht rettbar" if stats.failed else ""))
     progress(1, 1, msg)
-    log.info("Receive finished: %s, %d files, %d repaired stripe(s), %d skipped (resume)",
-             final, len(man["files"]), stream.repaired, stats.skipped)
-    return ReceiveResult(final, len(man["files"]), total_bytes, stream.repaired,
-                         resumed, stats.skipped, final / report.name)
+    log.info("Receive finished: %s, %d files, %d repaired stripe(s), %d skipped (resume), "
+             "%d failed, lost stripes %s", dest, len(done_files), stream.repaired, stats.skipped,
+             len(stats.failed), sorted(stats.lost_stripes))
+    return ReceiveResult(
+        dest, len(done_files), total_bytes, stream.repaired, resumed, stats.skipped,
+        dest / report.name, complete=not incomplete, missing=sorted(stats.failed),
+        lost_stripes=sorted(stats.lost_stripes), renamed=state.names.renamed(),
+        selected=selected is not None, without_manifest=synthetic)
 
 
 # ---------------------------------------------------------------- verify only
@@ -785,11 +1077,14 @@ def verify_transfer(
     progress: ProgressFn = null_progress,
     cancel: Optional[threading.Event] = None,
     deep: bool = True,
+    without_manifest: bool = False,
 ) -> VerifyResult:
     """Check every packet and (if `deep`) decode the whole stream and check every
     file hash – without writing anything to disk except one temporary stripe."""
     folder = Path(folder)
     man = read_manifest(folder)
+    if man is None and without_manifest:
+        man = synthesize_manifest(folder)
     if not man:
         raise TransferError(f"Kein gültiges Manifest in {folder}")
     p = man["params"]
@@ -874,7 +1169,7 @@ def _verify_content(folder: Path, man: dict, res: VerifyResult, verifier: Packet
                     progress: ProgressFn, cancel) -> None:
     """Decode the whole stream and compare every file hash with the manifest."""
     work = Path(tempfile.mkdtemp(prefix="vidtransfer-verify-"))
-    stream = _StripeStream(folder, work, progress, cancel, wait=False, verifier=verifier)
+    stream = _StripeStream(folder, work, progress, cancel, wait=False, verifier=verifier, manifest=man)
     got: dict[str, str] = {}
     try:
         if format_version(man) >= 2:

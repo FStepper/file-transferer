@@ -24,7 +24,7 @@ from typing import Optional
 from vidtransfer import APP_NAME, __version__
 from vidtransfer.config import Config, log_dir
 from vidtransfer.drive import default_cloudstorage_dir, find_drive_roots
-from vidtransfer.manifest import is_transfer_folder
+from vidtransfer.manifest import is_transfer_folder, read_manifest
 from vidtransfer.util import Cancelled, human_bytes
 
 log = logging.getLogger(__name__)
@@ -284,31 +284,43 @@ class App:
             messagebox.showerror(APP_NAME, f"„{path.name}“ ist kein VidTransfer-Ordner (manifest.json fehlt).")
             return
 
+        options: dict = {}
         if mode == "send":
             drive = self._drive_root()
             if drive is None:
                 return
             self.cfg.update(last_send_dir=str(path))
-            job = ("send", path, drive)
+            target = drive
         else:
             self.cfg.update(last_transfer_dir=str(path))
-            if mode == "verify":
-                job = ("verify", path, None)
-            else:
-                dest = self._ask_dir(f"Wohin soll „{path.name}“ wiederhergestellt werden?",
-                                     self.cfg.receive_dir, str(Path.home() / "Downloads"), str(Path.home()))
-                if dest is None:
+            if read_manifest(path) is None:
+                if not messagebox.askyesno(APP_NAME, (
+                        f"In „{path.name}“ fehlt ein lesbares Manifest (die Inhaltsliste).\n\n"
+                        "Falls Google Drive noch synchronisiert, bitte etwas warten.\n"
+                        "Sonst kann die App versuchen, die Dateien nur aus den Paketen "
+                        "wiederherzustellen (Notfall). Jetzt versuchen?")):
                     return
-                self.cfg.update(receive_dir=str(dest))
-                job = ("receive", path, dest)
+                options["without_manifest"] = True
+            target = None
+            if mode == "receive":
+                target = self._ask_dir(f"Wohin soll „{path.name}“ wiederhergestellt werden?",
+                                       self.cfg.receive_dir, str(Path.home() / "Downloads"), str(Path.home()))
+                if target is None:
+                    return
+                self.cfg.update(receive_dir=str(target))
+        self._queue_job(mode, path, target, options)
 
+    def _queue_job(self, mode: str, path: Path, target, options: dict) -> None:
         self.pending += 1
         label = {"send": "Senden", "receive": "Empfangen", "verify": "Prüfen"}[mode]
+        if options.get("salvage"):
+            label = "Rettbares wiederherstellen"
         self._log(f"{label}: {path.name}" + ("  (in Warteschlange)" if self.busy else ""))
-        self.jobs.put(job)
+        self.jobs.put((mode, path, target, options))
 
     # ------------------------------------------------------------ background work
-    def _run_job(self, kind: str, path: Path, target, progress) -> tuple[str, str, Optional[Path]]:
+    def _run_job(self, kind: str, path: Path, target, options: dict,
+                 progress) -> tuple[str, str, Optional[Path]]:
         """Run one job in the worker thread. Returns (outcome, text, path to reveal)."""
         if kind == "send":
             from vidtransfer.sender import send_folder
@@ -323,7 +335,8 @@ class App:
             from vidtransfer.messages import verify_summary
             from vidtransfer.receiver import verify_transfer
 
-            res = verify_transfer(path, progress, self.cancel)
+            res = verify_transfer(path, progress, self.cancel,
+                                  without_manifest=options.get("without_manifest", False))
             return (OK if res.ok else WARN), verify_summary(res), None
 
         from vidtransfer.messages import receive_summary
@@ -332,12 +345,14 @@ class App:
         status = _quick_status(path)
         if status:
             self.events.put(("log", status))
-        res = receive_folder(path, target, progress, self.cancel)
-        return OK, receive_summary(res), res.dest
+        res = receive_folder(path, target, progress, self.cancel, **options)
+        return (OK if res.complete and not res.without_manifest else WARN), receive_summary(res), res.dest
 
     def _worker(self) -> None:
+        from vidtransfer.receiver import StripeUnavailableError
+
         while True:
-            kind, path, target = self.jobs.get()
+            kind, path, target, options = self.jobs.get()
             self.cancel.clear()
             self.events.put(("start", kind, path.name))
             last = [0.0]
@@ -349,7 +364,14 @@ class App:
                     self.events.put(("progress", done, total, msg))
 
             try:
-                outcome, text, reveal = self._run_job(kind, path, target, progress)
+                outcome, text, reveal = self._run_job(kind, path, target, options, progress)
+            except StripeUnavailableError as exc:
+                if kind == "receive" and exc.upload_complete and not options.get("salvage"):
+                    # Parts are lost for good – let the user decide on a partial recovery
+                    self.events.put(("offer_salvage", path, target, options, str(exc)))
+                    continue
+                log.error("%s of %s failed\n%s", kind, path, traceback.format_exc())
+                outcome, text, reveal = ERROR, f"Fehler bei „{path.name}“: {exc}", None
             except Cancelled:
                 outcome, reveal = CANCELLED, None
                 text = f"„{path.name}“: abgebrochen."
@@ -383,11 +405,28 @@ class App:
                     if self.closing and not self.busy:
                         self.root.destroy()
                         return
+                elif ev[0] == "offer_salvage":
+                    self._offer_salvage(*ev[1:])
+                    if self.closing and not self.busy:
+                        self.root.destroy()
+                        return
         except queue.Empty:
             pass
         self.root.after(100, self._poll)
 
-    def _on_done(self, outcome: str, text: str, reveal: Optional[Path]) -> None:
+    def _offer_salvage(self, path: Path, target: Path, options: dict, reason: str) -> None:
+        self._on_done(WARN, f"„{path.name}“: Teile fehlen endgültig ({reason}).", None, quiet=True)
+        if self.closing:
+            return
+        if messagebox.askyesno(APP_NAME, (
+                f"Von „{path.name}“ sind einige Teile endgültig verloren – auch Google Drive "
+                "hat sie nicht mehr.\n\n"
+                "Soll alles andere jetzt wiederhergestellt werden? Die betroffenen Dateien "
+                "stehen danach im Bericht. Der Ordner heißt dann „… (incomplete)“ und lässt sich "
+                "später vervollständigen, wenn der Sender denselben Ordner noch einmal sendet.")):
+            self._queue_job("receive", path, target, {**options, "salvage": True})
+
+    def _on_done(self, outcome: str, text: str, reveal: Optional[Path], quiet: bool = False) -> None:
         self.pending -= 1
         self.busy = self.pending > 0
         if not self.busy:
@@ -402,6 +441,8 @@ class App:
             self.reveal_btn.configure(state="normal")
         if outcome != CANCELLED:
             _notify(APP_NAME, first)
+        if quiet:
+            return
         if outcome == ERROR:
             messagebox.showerror(APP_NAME, text)
         elif outcome == WARN:

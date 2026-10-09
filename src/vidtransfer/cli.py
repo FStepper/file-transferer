@@ -13,7 +13,7 @@ from vidtransfer.config import Config, setup_logging
 from vidtransfer.drive import find_drive_roots
 from vidtransfer.util import Cancelled, human_bytes
 
-COMMANDS = {"send", "receive", "verify", "status", "gui"}
+COMMANDS = {"send", "receive", "verify", "status", "list", "gui"}
 
 
 def _console_progress():
@@ -62,20 +62,45 @@ def cmd_send(a) -> int:
 
 def cmd_receive(a) -> int:
     from vidtransfer.messages import receive_summary
-    from vidtransfer.receiver import receive_folder
+    from vidtransfer.receiver import StripeUnavailableError, receive_folder
 
-    res = receive_folder(Path(a.folder), Path(a.dest), _console_progress(), wait=not a.no_wait)
+    try:
+        res = receive_folder(Path(a.folder), Path(a.dest), _console_progress(), wait=not a.no_wait,
+                             only=a.only, salvage=a.salvage, without_manifest=a.without_manifest)
+    except StripeUnavailableError as exc:
+        print(f"\nFehler: {exc}", file=sys.stderr)
+        if exc.upload_complete:
+            print("Teile des Transfers fehlen endgültig. Mit --salvage wird alles andere "
+                  "wiederhergestellt.", file=sys.stderr)
+        return 2
     print("\n" + receive_summary(res))
-    return 0
+    return 0 if res.complete else 2
 
 
 def cmd_verify(a) -> int:
     from vidtransfer.messages import verify_summary
     from vidtransfer.receiver import verify_transfer
 
-    res = verify_transfer(Path(a.folder), _console_progress(), deep=not a.quick)
+    res = verify_transfer(Path(a.folder), _console_progress(), deep=not a.quick,
+                          without_manifest=a.without_manifest)
     print("\n" + verify_summary(res))
     return 0 if res.ok or (a.quick and res.complete and not res.unrecoverable) else 2
+
+
+def cmd_list(a) -> int:
+    from vidtransfer.recovery import list_transfer
+
+    man, files = list_transfer(Path(a.folder))
+    if not man:
+        print("Kein gültiges Manifest gefunden.")
+        return 1
+    state = {True: "ok", False: "FEHLT", None: "?"}
+    for f in files:
+        print(f"{state[f.available]:>5}  {human_bytes(f.size):>10}  {f.compression:>4}  {f.path}")
+    missing = sum(f.available is False for f in files)
+    print(f"{len(files)} Dateien, {human_bytes(sum(f.size for f in files))}"
+          + (f", {missing} derzeit nicht wiederherstellbar" if missing else ""))
+    return 0 if not missing else 2
 
 
 def cmd_status(a) -> int:
@@ -131,12 +156,23 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("folder")
     r.add_argument("dest", help="Zielverzeichnis (darin wird der Ordner angelegt)")
     r.add_argument("--no-wait", action="store_true", help="nicht auf fehlende Pakete warten")
+    r.add_argument("--only", action="append", metavar="MUSTER",
+                   help="nur passende Dateien, z. B. \"Audio/*.wav\" oder \"clip01.mp4\" (mehrfach möglich)")
+    r.add_argument("--salvage", action="store_true",
+                   help="bei endgültig fehlenden Teilen alles andere wiederherstellen (Ordner \"… (incomplete)\")")
+    r.add_argument("--without-manifest", action="store_true",
+                   help="Notfall: ohne Manifest nur aus den Paketen wiederherstellen")
     r.set_defaults(func=cmd_receive)
 
     v = sub.add_parser("verify", help="alle Pakete und den Inhalt prüfen, ohne zu entpacken")
     v.add_argument("folder")
     v.add_argument("--quick", action="store_true", help="nur Pakete prüfen, Inhalt nicht dekodieren")
+    v.add_argument("--without-manifest", action="store_true", help="Notfall: ohne Manifest prüfen")
     v.set_defaults(func=cmd_verify)
+
+    ls = sub.add_parser("list", help="Dateien eines Transfers anzeigen (lädt nichts)")
+    ls.add_argument("folder")
+    ls.set_defaults(func=cmd_list)
 
     st = sub.add_parser("status", help="schneller Überblick über einen Transfer-Ordner (lädt nichts)")
     st.add_argument("folder")

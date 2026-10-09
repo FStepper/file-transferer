@@ -309,9 +309,16 @@ def test_insufficient_space(env, opts, monkeypatch):
     assert list(dest.iterdir()) == []
 
 
-@pytest.mark.parametrize("name", ["../evil", "/abs/path", "a/../../b", "C:/x", STATE_NAME, ""])
+@pytest.mark.parametrize("name", ["../evil", "/abs/path", "a/../../b", "./x/../..", STATE_NAME, ""])
 def test_unsafe_paths_rejected(tmp_path, name):
     assert _safe_target(tmp_path, name) is None
+
+
+def test_drive_letter_like_names_stay_inside(tmp_path):
+    """'C:' is a normal name on macOS; on Windows the colon is replaced, so it can
+    never turn into a drive-relative path."""
+    target = _safe_target(tmp_path, "C:/x")
+    assert target is not None and tmp_path in target.parents
 
 
 # ---------------------------------------------------------------- verify only

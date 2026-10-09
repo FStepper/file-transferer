@@ -163,22 +163,100 @@ class RecordWriter:
 
 # ---------------------------------------------------------------- reading
 
+def _parse_header_at(buf: bytes, i: int):
+    """Try to parse a record header at buf[i:]. Returns its length, None if invalid,
+    or -1 if more bytes are needed to decide."""
+    if len(buf) - i < _FIXED.size:
+        return -1
+    magic, version, rtype, _flags, _res, _size, _mtime, _mode, plen = _FIXED.unpack_from(buf, i)
+    if magic != REC_MAGIC or version != REC_VERSION or rtype not in (T_FILE, T_DIR, T_END):
+        return None
+    end = i + _FIXED.size + plen + _CRC.size
+    if len(buf) < end:
+        return -1
+    (crc,) = _CRC.unpack_from(buf, end - _CRC.size)
+    return end - i if crc == zlib.crc32(buf[i:end - _CRC.size]) else None
+
+
 class RecordReader:
-    """Parses records from a stream that has `read(n)` and a `pos` attribute."""
+    """Parses records from a stream that has `read(n)`, `pos` and `skip_to(pos)`.
+
+    Bytes read ahead while searching for the next record (`resync`) are kept in
+    a small push-back buffer, so `pos` always refers to the next unparsed byte.
+    """
 
     def __init__(self, stream, cancel=None):
         self.stream = stream
         self.cancel = cancel
         self._dctx = zstandard.ZstdDecompressor()
+        self._pending = b""
+
+    @property
+    def pos(self) -> int:
+        return self.stream.pos - len(self._pending)
 
     def _read_exact(self, n: int) -> bytes:
-        data = self.stream.read(n)
+        if self._pending:
+            data, self._pending = self._pending[:n], self._pending[n:]
+            if len(data) < n:
+                data += self.stream.read(n - len(data))
+        else:
+            data = self.stream.read(n)
         if len(data) != n:
             raise ContainerError("Datenstrom endet unerwartet")
         return data
 
+    def skip_to(self, target: int) -> None:
+        d = target - self.pos
+        if d < 0:
+            raise ValueError("can only skip forward")
+        if d <= len(self._pending):
+            self._pending = self._pending[d:]
+        else:
+            rest = d - len(self._pending)
+            self._pending = b""
+            self.stream.skip_to(self.stream.pos + rest)
+
+    def reset(self) -> None:
+        """Forget read-ahead bytes (after the stream was repositioned from outside)."""
+        self._pending = b""
+
+    def resync(self, start: int) -> bool:
+        """Find the next valid record header at or after `start` (emergency recovery).
+
+        Searches for the record magic and accepts a candidate only if its header
+        CRC matches. Returns False at the end of the stream.
+        """
+        self._pending = b""
+        if start > self.stream.pos:
+            self.stream.skip_to(start)
+        buf, scan_from, eof = b"", 0, False
+        while True:
+            check_cancel(self.cancel)
+            i = buf.find(REC_MAGIC, scan_from)
+            if i != -1:
+                r = _parse_header_at(buf, i)
+                if r is None:
+                    scan_from = i + 1
+                    continue
+                if r > 0 or eof:
+                    if r > 0:
+                        self._pending = buf[i:]
+                        return True
+                    scan_from = i + 1
+                    continue
+            elif eof:
+                return False
+            else:
+                # keep a tail so a magic split across reads is still found
+                keep = max(scan_from, len(buf) - (len(REC_MAGIC) - 1))
+                buf, scan_from = buf[keep:], 0
+            chunk = self.stream.read(CHUNK)
+            eof = not chunk
+            buf += chunk
+
     def next(self) -> RecordHeader:
-        offset = self.stream.pos
+        offset = self.pos
         fixed = self._read_exact(_FIXED.size)
         magic, version, rtype, flags, _res, size, mtime, mode, plen = _FIXED.unpack(fixed)
         if magic != REC_MAGIC:
@@ -198,7 +276,7 @@ class RecordReader:
     def read_data(self, rec: RecordHeader, write: Callable[[bytes], None]) -> str:
         """Stream the original file data to `write`, verify the trailer, return the SHA-256 hex."""
         h = hashlib.sha256()
-        start = self.stream.pos
+        start = self.pos
         produced = 0
         if rec.compressed:
             while True:
@@ -226,7 +304,7 @@ class RecordReader:
                 produced += len(chunk)
                 h.update(chunk)
                 write(chunk)
-        stored = self.stream.pos - start
+        stored = self.pos - start
         body = self._read_exact(_TRAILER.size)
         (crc,) = _CRC.unpack(self._read_exact(_CRC.size))
         magic, sha, stored_expected = _TRAILER.unpack(body)
@@ -241,6 +319,6 @@ class RecordReader:
     def skip_data(self, rec: RecordHeader, length: Optional[int]) -> None:
         """Skip the rest of a file record; jumps directly if the record length is known."""
         if length is not None:
-            self.stream.skip_to(rec.offset + length)
+            self.skip_to(rec.offset + length)
         else:
             self.read_data(rec, lambda _b: None)

@@ -19,6 +19,7 @@ import tarfile
 import tempfile
 import threading
 import time
+import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -111,6 +112,12 @@ def _ignored(name: str) -> bool:
     return name in IGNORED_NAMES or name.startswith("._")
 
 
+def _rel(p: Path, src: Path) -> str:
+    # NFC: macOS file systems hand out decomposed (NFD) names; normalising makes
+    # names, hashes and comparisons identical on every platform.
+    return unicodedata.normalize("NFC", p.relative_to(src).as_posix())
+
+
 def scan_source(src: Path) -> list[SourceEntry]:
     entries: list[SourceEntry] = []
     for dirpath, dirnames, filenames in os.walk(src):
@@ -121,13 +128,13 @@ def scan_source(src: Path) -> list[SourceEntry]:
             if p.is_symlink():
                 continue
             st = p.stat()
-            entries.append(SourceEntry(p.relative_to(src).as_posix(), p, True, 0, int(st.st_mtime)))
+            entries.append(SourceEntry(_rel(p, src), p, True, 0, int(st.st_mtime)))
         for fn in sorted(filenames):
             p = base / fn
             if _ignored(fn) or p.is_symlink() or not p.is_file():
                 continue
             st = p.stat()
-            entries.append(SourceEntry(p.relative_to(src).as_posix(), p, False, st.st_size, int(st.st_mtime)))
+            entries.append(SourceEntry(_rel(p, src), p, False, st.st_size, int(st.st_mtime)))
     entries.sort(key=lambda e: e.rel)
     return entries
 

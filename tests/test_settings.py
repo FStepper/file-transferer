@@ -47,6 +47,7 @@ def app(monkeypatch):
     dialogs = Dialogs()
     monkeypatch.setattr(gui.filedialog, "askdirectory", dialogs.askdirectory)
     monkeypatch.setattr(gui.messagebox, "showwarning", lambda *a, **k: None)
+    monkeypatch.setattr(gui.messagebox, "askyesno", lambda *a, **k: True)
     root = tk.Tk()
     root.withdraw()
     a = gui.App(root, [])
@@ -116,7 +117,14 @@ def test_receive_dialogs_remember_location(app, tmp_path):
     # 2nd transfer dialog opens in the last transfer folder, 2nd destination dialog in the last destination
     assert dialogs.initialdirs[2] == str(folder)
     assert dialogs.initialdirs[3] == str(export)
-    assert a.queued[-1] == ("receive", folder, export)
+    assert a.queued[-1][:3] == ("receive", folder, export)
+
+
+def test_lost_parts_offer_salvage(app, tmp_path):
+    a, dialogs = app
+    a.pending = 1                                   # the failed receive job
+    a._offer_salvage(tmp_path / "Shoot", tmp_path / "out", {}, "Stripe 3: nur 8 von 10")
+    assert a.queued == [("receive", tmp_path / "Shoot", tmp_path / "out", {"salvage": True})]
 
 
 @pytest.mark.skipif(not gui.IS_WIN, reason="Windows Explorer command line")
