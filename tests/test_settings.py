@@ -119,6 +119,18 @@ def test_receive_dialogs_remember_location(app, tmp_path):
     assert a.queued[-1] == ("receive", folder, export)
 
 
+@pytest.mark.skipif(not gui.IS_WIN, reason="Windows Explorer command line")
+def test_reveal_quotes_path_with_spaces(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(gui.subprocess, "Popen", lambda cmd, *a, **k: calls.append(cmd))
+    target = tmp_path / "Dreh Tag 1 (Kamera A)"
+    target.mkdir()
+    gui._reveal(target)
+    # One command line with only the path quoted – an argument list would quote
+    # "/select,<path>" as a whole, and Explorer would open "Documents" instead.
+    assert calls == [f'explorer /select,"{target.resolve()}"']
+
+
 def test_other_window_change_is_picked_up(app, tmp_path):
     a, dialogs = app
     old, new = tmp_path / "alt", tmp_path / "neu"

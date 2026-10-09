@@ -61,7 +61,10 @@ def _reveal(path: Path) -> None:
         if IS_MAC:
             subprocess.Popen(["open", "-R", str(path)])
         elif IS_WIN:
-            subprocess.Popen(["explorer", f"/select,{path}"])
+            # Must be passed as one command line: with an argument list, Python quotes
+            # the whole '/select,<path>' when the path contains spaces, which Explorer
+            # does not understand (it then opens "Documents" instead).
+            subprocess.Popen(f'explorer /select,"{Path(path).resolve()}"')
         else:
             subprocess.Popen(["xdg-open", str(path.parent)])
     except OSError:
