@@ -14,7 +14,7 @@ from vidtransfer.cli import main
 from vidtransfer.config import CONFIG_DIR_ENV, Config
 
 REPO = Path(__file__).resolve().parents[1]
-SCRIPT = REPO / "packaging" / "VidTransfer installieren.command"
+SCRIPT = REPO / "packaging" / "Install VidTransfer.command"
 
 
 @pytest.fixture(autouse=True)

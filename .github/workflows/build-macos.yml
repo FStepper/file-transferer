@@ -23,7 +23,7 @@ jobs:
       - run: python -m pytest -q
       - name: Lint shell scripts
         if: runner.os == 'macOS'
-        run: shellcheck --shell=bash -S warning "packaging/VidTransfer installieren.command" packaging/build_mac.sh
+        run: shellcheck --shell=bash -S warning "packaging/Install VidTransfer.command" packaging/build_mac.sh
 
   build:
     needs: test

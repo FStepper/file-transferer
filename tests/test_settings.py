@@ -158,7 +158,7 @@ def test_drop_sorts_items(app, tmp_path):
 
     a.handle_paths([str(shoot), str(f1), str(f2), str(incoming)])
     kinds = sorted((j.kind, j.name.split(" ")[0], len(j.sources)) for j in a.submitted)
-    assert kinds == [("receive", "Interview", 1), ("send", "Dateien", 2), ("send", "Drehtag", 1)]
+    assert kinds == [("receive", "Interview", 1), ("send", "Drehtag", 1), ("send", "Files", 2)]
     files_job = next(j for j in a.submitted if j.options.get("files"))
     assert ":" not in files_job.name                # valid folder name everywhere
     assert a.mode_var.get() == "send"

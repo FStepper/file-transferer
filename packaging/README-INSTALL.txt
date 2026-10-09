@@ -3,17 +3,17 @@ VidTransfer – installation on a Mac (once per Mac)
 
 1. Unzip the download. The folder contains:
      VidTransfer.app
-     VidTransfer installieren.command
+     Install VidTransfer.command
      README-INSTALL.txt
 
-2. Double-click "VidTransfer installieren.command".
+2. Double-click "Install VidTransfer.command".
    Because the app is not notarized by Apple, macOS blocks the script the
    first time. Then:
      - right-click the script → Open → Open, or
      - macOS 15 and later: System Settings › Privacy & Security, scroll down,
        "Open Anyway" next to the message about the script.
    Alternative in Terminal (no warning):
-     bash "/path/to/VidTransfer installieren.command"
+     bash "/path/to/Install VidTransfer.command"
 
 3. The script copies the app to Applications, removes the macOS block on the app
    and asks four questions:

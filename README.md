@@ -18,7 +18,7 @@ delivery, log, advanced parameters).
 **Sending**
 1. Drag a folder (e.g. `Shoot Day 3`) onto the window or onto the VidTransfer
    icon in the Dock – or click **„Ordner auswählen …“**. Loose files can be
-   dropped too; they become one delivery called `Dateien <date>`.
+   dropped too; they become one delivery called `Files <date>`.
 2. The card shows *Wird vorbereitet – 45 % · noch ca. 6 Min.*
 3. When it says **✔ Liegt in Google Drive**, the app's job is done. Google Drive
    then uploads in the background – the Mac should stay online until Google Drive
@@ -136,9 +136,9 @@ The overhead is `m / k` = 30 %. You can change these settings in
 Prebuilt app: `VidTransfer-macOS-arm64.zip` (Apple Silicon: M1/M2/…) or
 `VidTransfer-macOS-x86_64.zip` (Intel; also runs on Apple Silicon via Rosetta).
 The ZIP contains a folder with `VidTransfer.app`, the install script
-`VidTransfer installieren.command` and `README-INSTALL.txt`.
+`Install VidTransfer.command` and `README-INSTALL.txt`.
 
-Once per Mac, double-click **`VidTransfer installieren.command`**. The script:
+Once per Mac, double-click **`Install VidTransfer.command`**. The script:
 - copies the app to **Applications** (asks for an admin password if needed),
 - removes the macOS block on the app (it is not notarized by Apple),
 - asks for the Google Drive folder (same folder on every Mac; lists the Drive
@@ -151,7 +151,7 @@ time: right-click → **Open**, or on macOS 15 and later **System Settings ›
 Privacy & Security › Open Anyway**. Alternatively, run it in Terminal:
 
 ```bash
-bash "VidTransfer installieren.command"
+bash "Install VidTransfer.command"
 ```
 
 All answers can be changed later in the app's settings. The script stores them
@@ -184,7 +184,7 @@ commands):
 
 ```bash
 VT_DRY_RUN=1 VT_SRC_APP=<any folder> VT_DEST_DIR=<folder> VT_APP_BIN="python -m vidtransfer" \
-  bash "packaging/VidTransfer installieren.command"
+  bash "packaging/Install VidTransfer.command"
 ```
 Alternatively, the GitHub workflow `build-macos` builds both variants (start it
 manually or push a `v*` tag).

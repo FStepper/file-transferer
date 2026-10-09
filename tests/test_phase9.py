@@ -27,9 +27,9 @@ def test_send_loose_files_as_one_delivery(tmp_path):
     three.write_bytes(b"3" * 3000)
     drive = tmp_path / "Drive"
     drive.mkdir()
-    res = send_files([one, two, three], "Dateien 2026-10-09 14.02", drive, OPTS, sender="Kamera-Mac")
+    res = send_files([one, two, three], "Files 2026-10-09 14.02", drive, OPTS, sender="Kamera-Mac")
     man = read_manifest(res.target)
-    assert man["name"] == "Dateien 2026-10-09 14.02" and man["sender"] == "Kamera-Mac"
+    assert man["name"] == "Files 2026-10-09 14.02" and man["sender"] == "Kamera-Mac"
     assert sorted(f["path"] for f in man["files"]) == ["clip (2).mp4", "clip.mp4", "ton.wav"]
     out = receive_folder(res.target, tmp_path / "out", wait=False)
     assert out.sender == "Kamera-Mac"

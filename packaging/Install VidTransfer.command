@@ -13,7 +13,7 @@
 #
 # Testing without a Mac (prints macOS-only commands instead of running them):
 #   VT_DRY_RUN=1 VT_SRC_APP=<any folder> VT_DEST_DIR=<folder> VT_APP_BIN=<vidtransfer command> \
-#     bash "VidTransfer installieren.command"
+#     bash "Install VidTransfer.command"
 
 cd "$(dirname "$0")" || exit 1
 

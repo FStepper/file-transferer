@@ -535,7 +535,7 @@ class App:
                 self.cfg.update(last_send_dir=str(f))
                 self.start_send(drive, [f], f.name, {})
             if files:
-                name = f"Dateien {datetime.now():%Y-%m-%d %H.%M}"
+                name = f"Files {datetime.now():%Y-%m-%d %H.%M}"
                 self.start_send(drive, files, name, {"files": True})
             self.set_mode(SEND)
         elif deliveries:

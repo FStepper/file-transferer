@@ -462,7 +462,7 @@ folder, "Lieferung manuell öffnen …" (old receive and verify functions),
   native library for macOS arm64/x86_64); to be checked in the PyInstaller build.
   If that fails: keep the Dock icon plus a click on the drop zone. Single files
   and several items are accepted: every dropped folder becomes one delivery;
-  loose files become one delivery named "Dateien <Datum>". A drop in mode
+  loose files become one delivery named "Files <date>". A drop in mode
   "Empfangen" onto a delivery folder still receives it (manual case).
 - **U20 Sender name in the manifest**, plus the delivery history.
 
@@ -487,7 +487,7 @@ folder, "Lieferung manuell öffnen …" (old receive and verify functions),
 
 **Phase 11 – installation**
 - **U15 Install script instead of notarization:** a double-clickable
-  `VidTransfer installieren.command` next to the app copies it to /Applications,
+  `Install VidTransfer.command` next to the app copies it to /Applications,
   removes the quarantine flag (`xattr -dr com.apple.quarantine`) and, if wanted,
   sets the Drive folder and the sender name. Done once per Mac by a technical
   person; users never see Gatekeeper dialogs.
@@ -561,7 +561,7 @@ upload time estimates).
       it is briefly open elsewhere failed with "access denied"; now retried
 11. ◐ **Installation:** install script (quarantine flag, Drive folder, sender name),
     optional start at login (U15, U16). Prepared, **not yet tested on a Mac**:
-    - `packaging/VidTransfer installieren.command` (bash 3.2 compatible) copies
+    - `packaging/Install VidTransfer.command` (bash 3.2 compatible) copies
       the app to /Applications (sudo only if needed), quits a running copy,
       removes the quarantine flag and asks for Drive folder (lists Drive folders
       and shared drives, suggests a subfolder), name, mode, inbox and start at login
