@@ -86,12 +86,17 @@ def test_send_dialog_remembers_location(app, tmp_path):
         d.mkdir(parents=True)
     Config.load().update(drive_root=str(target))
 
-    dialogs.answers = [str(shoots / "Tag 1"), str(shoots / "Tag 2")]
+    dialogs.answers = [str(shoots / "Tag 1"), str(shoots / "Tag 2"), str(shoots / "Tag 2")]
     a._pick_send()
     a._pick_send()
-    assert dialogs.initialdirs[1] == str(shoots)   # second dialog starts where the first ended
+    assert dialogs.initialdirs[1] == str(shoots / "Tag 1")   # opens in the folder opened last
     assert [j[1].name for j in a.queued] == ["Tag 1", "Tag 2"]
     assert all(j[2] == target for j in a.queued)
+    assert Config.load().last_send_dir == str(shoots / "Tag 2")
+
+    (shoots / "Tag 2").rmdir()                     # remembered folder is gone
+    a._pick_send()
+    assert dialogs.initialdirs[2] == str(shoots)   # nearest existing parent
 
 
 def test_receive_dialogs_remember_location(app, tmp_path):
@@ -108,8 +113,8 @@ def test_receive_dialogs_remember_location(app, tmp_path):
     dialogs.answers = [str(folder), str(export), str(folder), str(export)]
     a._pick_receive()
     a._pick_receive()
-    # 2nd transfer dialog starts next to the last transfer, 2nd destination dialog at the last destination
-    assert dialogs.initialdirs[2] == str(transfers)
+    # 2nd transfer dialog opens in the last transfer folder, 2nd destination dialog in the last destination
+    assert dialogs.initialdirs[2] == str(folder)
     assert dialogs.initialdirs[3] == str(export)
     assert a.queued[-1] == ("receive", folder, export)
 

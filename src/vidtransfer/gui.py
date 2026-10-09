@@ -68,6 +68,18 @@ def _reveal(path: Path) -> None:
         log.exception("Could not reveal %s", path)
 
 
+def _existing_dir(raw: Optional[str]) -> Optional[Path]:
+    """`raw` if it is a directory, else its nearest existing parent (None if unset)."""
+    if not raw:
+        return None
+    p = Path(raw)
+    while not p.is_dir():
+        if p.parent == p:
+            return None
+        p = p.parent
+    return p
+
+
 def _quick_status(path: Path) -> Optional[str]:
     """One-line overview of a transfer folder (headers only, downloads nothing)."""
     from vidtransfer.receiver import transfer_status
@@ -191,9 +203,13 @@ class App:
         self.drive_var.set(cur + ("   (eigener Ordner, z. B. zum lokalen Testen)" if local else ""))
 
     def _ask_dir(self, title: str, *initial: Optional[str]) -> Optional[Path]:
-        """Folder dialog starting in the first existing of `initial`."""
+        """Folder dialog starting in the first existing of `initial`.
+
+        If a remembered folder was deleted or renamed, its nearest existing parent
+        is used instead of falling back to the defaults.
+        """
         opts = dict(title=title, mustexist=True)
-        start = next((d for d in initial if d and Path(d).is_dir()), None)
+        start = next((d for d in map(_existing_dir, initial) if d), None)
         if start:
             opts["initialdir"] = str(start)
         if IS_MAC:
@@ -207,13 +223,13 @@ class App:
 
     def _pick_send(self) -> None:
         self._reload_config()
-        p = self._ask_dir("Ordner zum Senden wählen", self.cfg.last_send_parent, str(Path.home()))
+        p = self._ask_dir("Ordner zum Senden wählen", self.cfg.last_send_dir, str(Path.home()))
         if p:
             self.add_path(str(p), mode="send")
 
     def _pick_transfer(self, title: str) -> Optional[Path]:
         self._reload_config()
-        return self._ask_dir(title, self.cfg.last_transfer_parent, self.cfg.drive_root,
+        return self._ask_dir(title, self.cfg.last_transfer_dir, self.cfg.drive_root,
                              str(default_cloudstorage_dir()))
 
     def _pick_receive(self) -> None:
@@ -269,10 +285,10 @@ class App:
             drive = self._drive_root()
             if drive is None:
                 return
-            self.cfg.update(last_send_parent=str(path.parent))
+            self.cfg.update(last_send_dir=str(path))
             job = ("send", path, drive)
         else:
-            self.cfg.update(last_transfer_parent=str(path.parent))
+            self.cfg.update(last_transfer_dir=str(path))
             if mode == "verify":
                 job = ("verify", path, None)
             else:

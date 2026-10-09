@@ -44,8 +44,8 @@ def log_dir() -> Path:
 class Config:
     drive_root: Optional[str] = None          # target folder for sending (Google Drive or a local test folder)
     receive_dir: Optional[str] = None         # last destination chosen for receiving
-    last_send_parent: Optional[str] = None    # where the "send folder" dialog starts
-    last_transfer_parent: Optional[str] = None  # where the "receive"/"verify" dialogs start
+    last_send_dir: Optional[str] = None       # folder last opened in the "send folder" dialog
+    last_transfer_dir: Optional[str] = None   # folder last opened in the "receive"/"verify" dialogs
     k: int = 10
     m: int = 3
     block_mib: int = 32
