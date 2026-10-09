@@ -541,8 +541,23 @@ upload time estimates).
      Windows (tkdnd 2.10.2); the macOS build collects `osx-arm64`/`osx-x64` via
      the same hook and still has to be checked on a Mac
    - the Mac is kept awake only while a job is running
-10. **UI, part 2 – receiving:** automatic receiving into the inbox, delivery list
+10. ✔ **UI, part 2 – receiving:** automatic receiving into the inbox, delivery list
     with sender name, incoming progress from the packet count, free up Drive space
-    (U5, U6, U12, U21)
+    (U5, U6, U12, U21). Notes from the implementation:
+    - `watch.py` scans by file names and manifests only; a watcher thread runs
+      every 20 s while the mode is "Empfangen" and automatic receiving is on
+    - instead of a dialog on first use: deliveries that were already in Drive, and
+      deliveries sent from this computer, appear as cards with "Empfangen"
+      (prevents a sending Mac from fetching its own 200 GB, and still allows a
+      local test on one computer); handled deliveries are remembered in
+      `received.json`, so removing a card never fetches it again
+    - lost parts: restore everything else automatically, then complete the
+      delivery as soon as the packet count has grown and every stripe is complete
+    - "Platz in Google Drive freigeben" deletes the delivery folder only if it
+      contains nothing but VidTransfer's own files of exactly this delivery
+    - the receiving page has a compact header instead of a drop zone; dropping
+      onto the window still works; the program title was removed from the window
+    - found along the way (Windows): replacing a file in the Drive folder while
+      it is briefly open elsewhere failed with "access denied"; now retried
 11. **Installation:** install script (quarantine flag, Drive folder, sender name),
     optional start at login (U15, U16)

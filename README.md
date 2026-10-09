@@ -29,15 +29,23 @@ Something went wrong (crash, restart, folder changed)? Click **Fortsetzen** or
 skipped and damaged ones replaced.
 
 **Receiving**
-1. Switch to **Empfangen**, then drag the delivery folder from Google Drive onto
-   the window (or click **„Lieferung auswählen …“**). Dropping a delivery in mode
-   „Senden“ works as well – the app switches over by itself.
-2. The delivery goes straight into the inbox, by default `~/Movies/VidTransfer`
-   (changeable in the settings). The card shows who sent it.
+1. Switch to **Empfangen** – that is all. The app watches the Google Drive folder
+   and receives every new delivery **automatically** into the inbox, by default
+   `~/Movies/VidTransfer` (changeable in the settings). The card shows who sent it.
+2. While the sender is still uploading, the card says *Wird noch hochgeladen
+   (35 %)*; receiving runs alongside and waits for the rest.
 3. The app verifies the packets, repairs missing ones, unpacks everything and
-   verifies every file. This already works while the sender is still uploading;
-   the card then says *Wartet auf Google Drive …*.
-4. **✔ Angekommen** – **„Im Finder zeigen“** opens the folder.
+   verifies every file.
+4. **✔ Angekommen** – **„Im Finder zeigen“** opens the folder. The link
+   **„Platz in Google Drive freigeben“** deletes the delivery from Google Drive
+   (after asking; the received files stay). Google Drive frees the space once its
+   trash is emptied.
+
+Deliveries that were already in Google Drive before automatic receiving was used
+for the first time, and deliveries sent from this computer, are not fetched
+unasked – they appear as cards with a button **„Empfangen“**. A delivery can also
+be opened by hand with **„Lieferung öffnen …“** or by dragging it onto the window.
+Automatic receiving can be switched off in the settings.
 
 Problems are shown in one plain sentence with one button that helps, e.g.
 *„Der Google-Drive-Ordner ist nicht erreichbar. Läuft Google Drive?“* →
@@ -64,12 +72,12 @@ How unpacking stays safe:
 **If parts are lost for good**
 
 If some packets are missing for good (the upload is complete, but Google Drive
-does not have them), the card says *„Ein Teil der Lieferung fehlt in Google
-Drive.“* → **Alles andere jetzt holen**. The result is a folder
-`Shoot Day 3 (incomplete)`; the card says how many files are missing and asks to
+does not have them), automatic receiving restores everything else into a folder
+`Shoot Day 3 (incomplete)`. The card says how many files are missing and asks to
 send the folder again on the sending Mac (only the missing packets are written).
-Then click **Fehlende Dateien holen** – the folder is completed and renamed to
-`Shoot Day 3`.
+As soon as they have arrived, the app completes the delivery by itself and renames
+the folder to `Shoot Day 3` (or click **Fehlende Dateien holen**). For deliveries
+opened by hand, the card offers **Alles andere jetzt holen**.
 
 If the content list (manifest) of a delivery is unreadable, the app offers an
 emergency recovery from the packets alone. Every restored file is still
@@ -90,8 +98,9 @@ whether the delivery is completely recoverable.
 The target for sending does not have to be Google Drive: in **Einstellungen**,
 click **„Ändern …“** next to „Senden nach (Google Drive)“ and choose any local
 folder, e.g. `D:\VidTransfer-Test`. The app keeps that choice and never switches
-back to the Drive folder by itself. Sending writes the delivery folder there; to
-receive, drop that delivery folder onto the window in mode „Empfangen“.
+back to the Drive folder by itself. Sending writes the delivery folder there. In
+mode „Empfangen“ the app watches the same folder; deliveries sent from this
+computer appear as cards with **„Empfangen“** (they are not fetched unasked).
 
 Every folder dialog remembers the folder that was opened last. On the command
 line, the target is given with `--drive`:
