@@ -121,13 +121,13 @@ def run_installer(tmp_path: Path, answers: list[str], home: Path) -> subprocess.
 def test_installer_with_typed_folder(tmp_path):
     drive = tmp_path / "Geteilt" / "VidTransfer"
     drive.mkdir(parents=True)
-    out = run_installer(tmp_path, [drive.as_posix(), "Kamera-Mac", "e", "", "j", "n", ""], tmp_path / "home")
+    out = run_installer(tmp_path, [drive.as_posix(), "Kamera-Mac", "r", "", "y", "n", ""], tmp_path / "home")
     assert out.returncode == 0, out.stdout + out.stderr
-    assert "[Probelauf] ditto" in out.stdout and "com.apple.quarantine" in out.stdout
+    assert "[dry run] ditto" in out.stdout and "com.apple.quarantine" in out.stdout
     cfg = Config.load()
     assert Path(cfg.drive_root) == drive
     assert (cfg.sender_name, cfg.mode) == ("Kamera-Mac", "receive")
-    assert "VidTransfer ist installiert" in out.stdout
+    assert "VidTransfer is installed" in out.stdout
 
 
 @pytest.mark.skipif(BASH is None, reason="bash not available")
@@ -148,7 +148,7 @@ def test_installer_with_listed_folder_and_subfolder(tmp_path):
 @pytest.mark.skipif(BASH is None, reason="bash not available")
 def test_installer_stops_at_end_of_input(tmp_path):
     out = run_installer(tmp_path, [(tmp_path / "falsch").as_posix()], tmp_path / "home")
-    assert out.returncode == 1 and "abgebrochen" in out.stdout
+    assert out.returncode == 1 and "cancelled" in out.stdout
 
 
 @pytest.mark.skipif(BASH is None, reason="bash not available")
@@ -158,5 +158,5 @@ def test_installer_asks_again_for_a_missing_folder(tmp_path):
     out = run_installer(tmp_path, [(tmp_path / "falsch").as_posix(), good.as_posix(), "", "s", "n", "n", ""],
                         tmp_path / "home")
     assert out.returncode == 0, out.stdout + out.stderr
-    assert "Diesen Ordner gibt es nicht" in out.stdout
+    assert "This folder does not exist" in out.stdout
     assert Path(Config.load().drive_root) == good

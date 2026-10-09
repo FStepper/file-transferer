@@ -4,7 +4,7 @@
 #
 # - copies VidTransfer.app to /Applications (asks for an admin password if needed)
 # - removes the quarantine flag, because the app is not notarized by Apple
-# - asks for the Google Drive folder, this Mac's name, the start mode and whether
+# - asks for the cloud folder (default: Google Drive), this Mac's name, the start mode and whether
 #   the app should start at login, and stores them via the app's own
 #   "config" command (so this script never edits settings files itself)
 #
@@ -27,14 +27,14 @@ say() { printf '%s\n' "$*"; }
 
 finish() {
     say ""
-    printf 'Zum Schließen Enter drücken … '
+    printf 'Press Enter to close … '
     read -r _ || true
     exit "${1:-0}"
 }
 
 fail() {
     say ""
-    say "FEHLER: $*"
+    say "ERROR: $*"
     finish 1
 }
 
@@ -48,17 +48,17 @@ ask() {
     if ! IFS= read -r REPLY; then
         # End of input (e.g. Ctrl-D): stop instead of asking the same question forever
         say ""
-        fail "Eingabe beendet – Installation abgebrochen."
+        fail "Input ended – installation cancelled."
     fi
     REPLY="${REPLY%$'\r'}"          # pasted text may carry a Windows line ending
     [ -z "$REPLY" ] && REPLY="$2"
 }
 
-# yes_no "Question" "j|n" -> exit status 0 for yes
+# yes_no "Question" "y|n" -> exit status 0 for yes
 yes_no() {
-    ask "$1 (j/n)" "$2"
+    ask "$1 (y/n)" "$2"
     case "$REPLY" in
-        [jJyY]*) return 0 ;;
+        [yY]*) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -66,7 +66,7 @@ yes_no() {
 # Run a command that changes the system; only printed in a dry run
 run() {
     if [ -n "$DRY" ]; then
-        say "  [Probelauf] $*"
+        say "  [dry run] $*"
     else
         "$@"
     fi
@@ -107,44 +107,43 @@ expand_home() {
     esac
 }
 
-say "VidTransfer installieren"
-say "========================"
+say "Install VidTransfer"
+say "==================="
 say ""
 
 if [ -z "$DRY" ] && [ "$(uname)" != "Darwin" ]; then
-    fail "Dieses Skript ist für macOS gedacht."
+    fail "This script is meant for macOS."
 fi
-[ -d "$SRC_APP" ] || fail "VidTransfer.app wurde neben diesem Skript nicht gefunden ($SRC_APP)."
+[ -d "$SRC_APP" ] || fail "VidTransfer.app was not found next to this script ($SRC_APP)."
 
 # ---------------------------------------------------------------- copy the app
 if [ -z "$DRY" ] && pgrep -x VidTransfer >/dev/null 2>&1; then
-    say "VidTransfer läuft noch und wird beendet …"
+    say "VidTransfer is still running and will be quit …"
     osascript -e 'quit app "VidTransfer"' >/dev/null 2>&1
     sleep 2
 fi
 
 if [ -z "$DRY" ] && [ ! -w "$DEST_DIR" ]; then
-    say "Zum Kopieren nach $DEST_DIR wird das Passwort eines Administrators benötigt."
+    say "Copying to $DEST_DIR needs an administrator password."
     NEED_SUDO=1
 fi
 
-say "Kopiere VidTransfer nach $DEST_DIR …"
+say "Copying VidTransfer to $DEST_DIR …"
 if [ -e "$DEST_APP" ]; then
-    priv rm -rf "$DEST_APP" || fail "Die alte Version konnte nicht entfernt werden."
+    priv rm -rf "$DEST_APP" || fail "The old version could not be removed."
 fi
-priv ditto "$SRC_APP" "$DEST_APP" || fail "Kopieren fehlgeschlagen."
+priv ditto "$SRC_APP" "$DEST_APP" || fail "Copying failed."
 
-# Not notarized: without this, macOS would refuse to open the app ("beschädigt")
+# Not notarized: without this, macOS would refuse to open the app ("damaged")
 priv xattr -dr com.apple.quarantine "$DEST_APP" 2>/dev/null
-say "Fertig kopiert."
+say "Copied."
 
 # ---------------------------------------------------------------- cloud folder (default: Google Drive)
 say ""
-say "1) Cloud-Ordner für die Lieferungen"
-say "   Wichtig: Auf allen Macs muss derselbe Ordner gewählt werden. Bei verschiedenen"
-say "   Cloud-Konten einen Ordner freigeben (Bearbeiter) und auf den anderen Konten"
-# shellcheck disable=SC1111  # German quotation marks in the text
-say "   zu „Meine Ablage“ hinzufügen – oder eine geteilte Ablage verwenden."
+say "1) Cloud folder for deliveries"
+say "   Important: choose the same folder on every Mac. With different accounts,"
+say "   share one folder (editor) and add it to \"My Drive\" on the other accounts –"
+say "   or use a shared drive."
 
 LOCATIONS=()
 while IFS= read -r line; do
@@ -154,7 +153,7 @@ done < <(vt config --list-drives 2>/dev/null)
 
 CURRENT="$(vt_get drive)"
 if [ ${#LOCATIONS[@]} -eq 0 ]; then
-    say "   Kein Google-Drive-Ordner gefunden. Bitte den Pfad zum Cloud-Ordner eingeben."
+    say "   No Google Drive folder found. Please enter the path of the cloud folder."
 else
     i=1
     for loc in "${LOCATIONS[@]}"; do
@@ -162,12 +161,12 @@ else
         i=$((i + 1))
     done
 fi
-[ -n "$CURRENT" ] && say "   Aktuell eingestellt: $CURRENT"
+[ -n "$CURRENT" ] && say "   Currently set: $CURRENT"
 
 DEFAULT="$CURRENT"
 [ -z "$DEFAULT" ] && [ ${#LOCATIONS[@]} -gt 0 ] && DEFAULT="1"
 while true; do
-    ask "   Nummer wählen oder Pfad eingeben" "$DEFAULT"
+    ask "   Choose a number or enter a path" "$DEFAULT"
     CHOICE="$REPLY"
     BASE=""
     FROM_LIST=""
@@ -183,48 +182,48 @@ while true; do
     if [ -n "$BASE" ] && [ -d "$BASE" ]; then
         break
     fi
-    say "   Diesen Ordner gibt es nicht – bitte noch einmal."
+    say "   This folder does not exist – please try again."
 done
 
 DRIVE="$BASE"
 if [ -n "$FROM_LIST" ]; then
-    ask "   Unterordner für die Lieferungen (leer = direkt hier)" "VidTransfer"
+    ask "   Subfolder for deliveries (empty = right here)" "VidTransfer"
     if [ -n "$REPLY" ]; then
         DRIVE="$BASE/$REPLY"
-        mkdir -p "$DRIVE" || fail "Ordner konnte nicht angelegt werden: $DRIVE"
+        mkdir -p "$DRIVE" || fail "Folder could not be created: $DRIVE"
     fi
 fi
-vt config --drive "$DRIVE" || fail "Der Ordner konnte nicht eingestellt werden."
+vt config --drive "$DRIVE" || fail "The folder could not be set."
 say "   → $DRIVE"
 
 # ---------------------------------------------------------------- name, mode, inbox, login
 say ""
-say "2) Name dieses Macs (wird beim Empfänger angezeigt)"
+say "2) Name of this Mac (shown to the receiver)"
 ask "   Name" "$(vt_get sender)"
-vt config --sender "$REPLY" || fail "Der Name konnte nicht gespeichert werden."
+vt config --sender "$REPLY" || fail "The name could not be saved."
 
 say ""
-say "3) Wofür wird dieser Mac hauptsächlich genutzt?"
-if [ "$(vt_get mode)" = "receive" ]; then MODE_DEFAULT="e"; else MODE_DEFAULT="s"; fi
-ask "   s = Senden, e = Empfangen" "$MODE_DEFAULT"
+say "3) What is this Mac mainly used for?"
+if [ "$(vt_get mode)" = "receive" ]; then MODE_DEFAULT="r"; else MODE_DEFAULT="s"; fi
+ask "   s = send, r = receive" "$MODE_DEFAULT"
 case "$REPLY" in
-    [eE]*) MODE="receive" ;;
+    [rR]*) MODE="receive" ;;
     *) MODE="send" ;;
 esac
-vt config --mode "$MODE" || fail "Der Modus konnte nicht gespeichert werden."
+vt config --mode "$MODE" || fail "The mode could not be saved."
 
 if [ "$MODE" = "receive" ]; then
     say ""
-    say "4) Wo sollen empfangene Lieferungen gespeichert werden?"
-    ask "   Ordner" "$(vt_get inbox)"
-    vt config --inbox "$(expand_home "$REPLY")" || fail "Die Ablage konnte nicht eingestellt werden."
-    LOGIN_DEFAULT="j"
+    say "4) Where should received deliveries be saved?"
+    ask "   Folder" "$(vt_get inbox)"
+    vt config --inbox "$(expand_home "$REPLY")" || fail "The folder could not be set."
+    LOGIN_DEFAULT="y"
 else
     LOGIN_DEFAULT="n"
 fi
 
 say ""
-if yes_no "VidTransfer beim Anmelden automatisch starten? (empfohlen für den Mac, der empfängt)" "$LOGIN_DEFAULT"; then
+if yes_no "Start VidTransfer automatically at login? (recommended for the receiving Mac)" "$LOGIN_DEFAULT"; then
     vt config --login on
 else
     vt config --login off
@@ -232,8 +231,8 @@ fi
 
 # ---------------------------------------------------------------- done
 say ""
-say "VidTransfer ist installiert (Programme › VidTransfer)."
-if yes_no "Jetzt öffnen?" "j"; then
+say "VidTransfer is installed (Applications › VidTransfer)."
+if yes_no "Open it now?" "y"; then
     run open "$DEST_APP"
 fi
 finish 0

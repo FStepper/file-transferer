@@ -1,4 +1,4 @@
-"""User-facing summaries shared by CLI and GUI (UI language: German)."""
+"""User-facing summaries shared by CLI and GUI."""
 
 from __future__ import annotations
 
@@ -8,28 +8,28 @@ from vidtransfer.util import human_bytes
 
 def receive_summary(res: ReceiveResult) -> str:
     if res.complete:
-        what = "ausgewählte Dateien wiederhergestellt" if res.selected else "wiederhergestellt"
-        parts = [f"„{res.dest.name}“ {what}: {res.files} Dateien, {human_bytes(res.bytes)}, alle Prüfsummen ok"]
+        what = "selected files restored" if res.selected else "restored"
+        parts = [f"\"{res.dest.name}\" {what}: {res.files} files, {human_bytes(res.bytes)}, all checksums ok"]
     else:
-        parts = [f"„{res.dest.name}“ nur teilweise wiederhergestellt: {res.files} Dateien "
-                 f"({human_bytes(res.bytes)}) sind in Ordnung"]
+        parts = [f"\"{res.dest.name}\" only partly restored: {res.files} files "
+                 f"({human_bytes(res.bytes)}) are fine"]
         if res.missing:
-            parts.append(f", {len(res.missing)} Datei(en) fehlen")
+            parts.append(f", {len(res.missing)} file(s) missing")
     if res.repaired_stripes:
-        parts.append(f", {res.repaired_stripes} Stripe(s) repariert")
+        parts.append(f", {res.repaired_stripes} stripe(s) repaired")
     if res.resumed:
-        parts.append(f", fortgesetzt ({res.skipped_files} Datei(en) waren schon fertig)")
+        parts.append(f", resumed ({res.skipped_files} file(s) were already done)")
     lines = ["".join(parts) + "."]
     if not res.complete:
         shown = ", ".join(res.missing[:5]) + (" …" if len(res.missing) > 5 else "")
         if shown:
-            lines.append(f"Fehlend: {shown}")
-        lines.append("Zum Vervollständigen auf dem Sender denselben Ordner erneut senden und dann "
-                     "erneut in dasselbe Ziel empfangen. Details stehen im Bericht.")
+            lines.append(f"Missing: {shown}")
+        lines.append("To complete it, send the same folder again on the sender and then "
+                     "receive again into the same target. Details are in the report.")
     if res.without_manifest:
-        lines.append("Ohne Manifest wiederhergestellt – ob Dateien fehlen, lässt sich nicht prüfen.")
+        lines.append("Restored without a manifest – whether files are missing cannot be checked.")
     if res.renamed:
-        lines.append(f"{len(res.renamed)} Name(n) wurden für dieses System angepasst (siehe Bericht).")
+        lines.append(f"{len(res.renamed)} name(s) were adjusted for this system (see report).")
     lines.append(f"→ {res.dest}")
     return "\n".join(lines)
 
@@ -37,26 +37,26 @@ def receive_summary(res: ReceiveResult) -> str:
 def verify_summary(res: VerifyResult) -> str:
     lines = []
     if res.ok:
-        lines.append(f"„{res.name}“ ist vollständig wiederherstellbar: {res.stripes} Stripes, "
-                     f"{res.files_checked} Dateien ({human_bytes(res.bytes_checked)}) per SHA-256 bestätigt.")
+        lines.append(f"\"{res.name}\" is fully recoverable: {res.stripes} stripes, "
+                     f"{res.files_checked} files ({human_bytes(res.bytes_checked)}) confirmed by SHA-256.")
     elif res.unrecoverable:
-        lines.append(f"„{res.name}“ ist derzeit NICHT vollständig wiederherstellbar: "
-                     f"{len(res.unrecoverable)} von {res.stripes} Stripes haben zu wenige gültige Pakete.")
+        lines.append(f"\"{res.name}\" is currently NOT fully recoverable: "
+                     f"{len(res.unrecoverable)} of {res.stripes} stripes have too few valid packets.")
     elif not res.complete:
-        lines.append(f"„{res.name}“: Upload noch nicht abgeschlossen – die bisher vorhandenen "
-                     f"{res.stripes} Stripes sind wiederherstellbar.")
+        lines.append(f"\"{res.name}\": upload not finished yet – the "
+                     f"{res.stripes} stripes present so far are recoverable.")
     else:
-        lines.append(f"„{res.name}“: Pakete in Ordnung, aber der Inhalt ist fehlerhaft.")
+        lines.append(f"\"{res.name}\": packets are fine, but the content is damaged.")
 
     if res.degraded:
-        lines.append(f"{len(res.degraded)} Stripe(s) nur mit Parität wiederherstellbar (das ist in Ordnung).")
+        lines.append(f"{len(res.degraded)} stripe(s) recoverable only with parity (that is fine).")
     if res.bad_packets:
         shown = ", ".join(res.bad_packets[:8]) + (" …" if len(res.bad_packets) > 8 else "")
-        lines.append(f"{len(res.bad_packets)} fehlende/defekte Paket(e): {shown}")
+        lines.append(f"{len(res.bad_packets)} missing/damaged packet(s): {shown}")
     if res.unrecoverable:
         shown = ", ".join(str(s + 1) for s in res.unrecoverable[:15])
-        lines.append(f"Betroffene Stripes: {shown}. Abhilfe: die Cloud fertig synchronisieren lassen oder "
-                     "auf dem Sender denselben Ordner erneut senden (schreibt nur fehlende Pakete).")
+        lines.append(f"Affected stripes: {shown}. Fix: let the cloud finish syncing or "
+                     "send the same folder again on the sender (writes only missing packets).")
     for err in res.content_errors[:10]:
         lines.append(f"  {err}")
     return "\n".join(lines)

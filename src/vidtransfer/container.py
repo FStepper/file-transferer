@@ -141,7 +141,7 @@ class RecordWriter:
                 check_cancel(self.cancel)
                 chunk = f.read(min(CHUNK, remaining))
                 if not chunk:
-                    raise SourceChangedError(f"„{rel}“ ist beim Senden kürzer geworden")
+                    raise SourceChangedError(f"\"{rel}\" got shorter while sending")
                 remaining -= len(chunk)
                 h.update(chunk)
                 if zstd:
@@ -152,7 +152,7 @@ class RecordWriter:
                     self.sink.write(chunk)
                 self.on_bytes(len(chunk))
             if f.read(1):
-                raise SourceChangedError(f"„{rel}“ ist beim Senden größer geworden")
+                raise SourceChangedError(f"\"{rel}\" got larger while sending")
         if zstd:
             self.sink.write(_LEN.pack(0))
         stored = self.sink.total - data_start
@@ -260,17 +260,17 @@ class RecordReader:
         fixed = self._read_exact(_FIXED.size)
         magic, version, rtype, flags, _res, size, mtime, mode, plen = _FIXED.unpack(fixed)
         if magic != REC_MAGIC:
-            raise ContainerError(f"kein Record an Position {offset}")
+            raise ContainerError(f"no record at position {offset}")
         if version != REC_VERSION or rtype not in (T_FILE, T_DIR, T_END):
             raise ContainerError(f"unbekannter Record-Typ an Position {offset}")
         raw = self._read_exact(plen)
         (crc,) = _CRC.unpack(self._read_exact(_CRC.size))
         if crc != zlib.crc32(fixed + raw):
-            raise ContainerError(f"Record-Header an Position {offset} ist beschädigt")
+            raise ContainerError(f"record header at position {offset} is damaged")
         try:
             path = raw.decode("utf-8")
         except UnicodeDecodeError as exc:
-            raise ContainerError(f"ungültiger Pfad an Position {offset}") from exc
+            raise ContainerError(f"invalid path at position {offset}") from exc
         return RecordHeader(rtype, flags, size, mtime, mode, path, offset)
 
     def read_data(self, rec: RecordHeader, write: Callable[[bytes], None]) -> str:
@@ -285,14 +285,14 @@ class RecordReader:
                 if n == 0:
                     break
                 if n > MAX_FRAME:
-                    raise ContainerError(f"„{rec.path}“: ungültige Blocklänge")
+                    raise ContainerError(f"\"{rec.path}\": invalid block length")
                 try:
                     chunk = self._dctx.decompress(self._read_exact(n), max_output_size=CHUNK)
                 except zstandard.ZstdError as exc:
-                    raise ContainerError(f"„{rec.path}“: Daten beschädigt ({exc})") from exc
+                    raise ContainerError(f"\"{rec.path}\": data damaged ({exc})") from exc
                 produced += len(chunk)
                 if produced > rec.size:
-                    raise ContainerError(f"„{rec.path}“: mehr Daten als angegeben")
+                    raise ContainerError(f"\"{rec.path}\": more data than declared")
                 h.update(chunk)
                 write(chunk)
         else:
@@ -309,11 +309,11 @@ class RecordReader:
         (crc,) = _CRC.unpack(self._read_exact(_CRC.size))
         magic, sha, stored_expected = _TRAILER.unpack(body)
         if magic != TRAILER_MAGIC or crc != zlib.crc32(body):
-            raise ContainerError(f"„{rec.path}“: Trailer beschädigt")
+            raise ContainerError(f"\"{rec.path}\": trailer damaged")
         if produced != rec.size or stored != stored_expected:
-            raise ContainerError(f"„{rec.path}“: Länge stimmt nicht")
+            raise ContainerError(f"\"{rec.path}\": length does not match")
         if h.digest() != sha:
-            raise ContainerError(f"„{rec.path}“: Prüfsumme falsch")
+            raise ContainerError(f"\"{rec.path}\": wrong checksum")
         return sha.hex()
 
     def skip_data(self, rec: RecordHeader, length: Optional[int]) -> None:

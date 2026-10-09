@@ -1,9 +1,9 @@
-"""Main window (Tk; UI language: German).
+"""Main window (Tk).
 
-One window, two modes – "Senden" and "Empfangen" – switched at the top; the
+One window, two modes – "Send" and "Receive" – switched at the top; the
 last mode is remembered.
-- "Senden": one drop zone and the list of sent deliveries.
-- "Empfangen": new deliveries in the Google Drive folder are received
+- "Send": one drop zone and the list of sent deliveries.
+- "Receive": new deliveries in the cloud folder are received
   automatically into the inbox; the list shows them with the sender's name.
 Each delivery card has one status line and at most one button. Everything
 technical (log, manual verify, parameters) lives in the settings window or
@@ -43,9 +43,9 @@ IS_MAC, IS_WIN = desktop.IS_MAC, desktop.IS_WIN
 SEND, RECEIVE, VERIFY = "send", "receive", "verify"
 SCAN_SECONDS = 20
 
-SENT_HINT = "Die Cloud-App lädt jetzt im Hintergrund hoch – bitte online bleiben, bis sie fertig ist."
-DELETED_HINT = ("In der Cloud gelöscht. Der Platz wird frei, sobald der Papierkorb der "
-                "Cloud geleert ist.")
+SENT_HINT = "The cloud app is now uploading in the background – please stay online until it is done."
+DELETED_HINT = ("Deleted from the cloud. The space is freed once the cloud trash "
+                "is emptied.")
 
 
 def _existing_dir(raw: Optional[str]) -> Optional[Path]:
@@ -82,7 +82,7 @@ class DropZone(tk.Canvas):
                  drop_enabled: bool, bg: str):
         super().__init__(parent, height=96, highlightthickness=0, bd=0, bg=bg)
         # Without tkdnd only the Dock icon accepts drops, so do not promise it here
-        self.text = text if drop_enabled else text.replace("hierher ziehen", "auswählen")
+        self.text = text if drop_enabled else text.replace("Drag a folder with videos here", "Choose a folder with videos")
         self._hover = False
         self.button = ttk.Button(self, text=button_text, command=on_click)
         self.bind("<Configure>", lambda e: self._draw())
@@ -145,7 +145,7 @@ class Card(ttk.Frame):
         self.title.configure(text=d.name)
         self.meta.configure(text=self._meta_text())
         if d.state == DONE:
-            text = ("✔ Liegt in der Cloud" if d.kind == SEND else "✔ Angekommen") + \
+            text = ("✔ In the cloud" if d.kind == SEND else "✔ Received") + \
                    (f" · {when(d.finished)}" if d.finished else "")
         elif d.state == PAUSED:
             text = "⏸ " + d.message
@@ -182,8 +182,8 @@ class Card(ttk.Frame):
         if d.state in (FAILED, INCOMPLETE) and d.details:
             return "Details"
         if self.app.can_free_drive(d):
-            return f"Platz in der Cloud freigeben ({human_bytes(d.size)})" if d.size else \
-                "Platz in der Cloud freigeben"
+            return f"Free up cloud space ({human_bytes(d.size)})" if d.size else \
+                "Free up cloud space"
         return ""
 
     def _on_link(self, _event) -> None:
@@ -193,7 +193,7 @@ class Card(ttk.Frame):
             self.app.free_drive(self.d)
 
     def progress(self, done: int, total: int, msg: str) -> None:
-        self._waiting = msg.startswith("Warte")
+        self._waiting = msg.startswith("Waiting")
         if total:
             self.bar.configure(value=1000 * min(done, total) / total)
             if not self.d.size:
@@ -204,7 +204,7 @@ class Card(ttk.Frame):
     def set_incoming(self, percent: int) -> None:
         self.incoming = percent
         if self.d.state == RUNNING and self._waiting:
-            self.status.configure(text=running_text(self.d.kind, 0, 0, "Warte", self.eta, percent))
+            self.status.configure(text=running_text(self.d.kind, 0, 0, "Waiting", self.eta, percent))
 
     def _on_button(self) -> None:
         action = "stop" if self.d.state in ACTIVE else self.d.action
@@ -217,7 +217,7 @@ class Card(ttk.Frame):
             menu.add_command(label=ACTIONS["reveal"], command=lambda: desktop.reveal(Path(self.d.result)))
         menu.add_command(label="Details", command=lambda: self.app.show_details(self.d))
         if self.d.state not in ACTIVE:
-            menu.add_command(label="Aus der Liste entfernen", command=lambda: self.app.remove(self.d))
+            menu.add_command(label="Remove from list", command=lambda: self.app.remove(self.d))
         menu.tk_popup(event.x_root, event.y_root)
 
 
@@ -339,17 +339,17 @@ class App:
         switch = ttk.Frame(head, style="Segment.TFrame", padding=2)
         switch.pack(side="left")
         self.mode_var = tk.StringVar(value=self.cfg.mode if self.cfg.mode in (SEND, RECEIVE) else SEND)
-        for value, text in ((SEND, "Senden"), (RECEIVE, "Empfangen")):
+        for value, text in ((SEND, "Send"), (RECEIVE, "Receive")):
             ttk.Radiobutton(switch, text=text, value=value, variable=self.mode_var, style="Toolbutton",
                             command=self._mode_changed).pack(side="left")
-        ttk.Button(head, text="Einstellungen", command=self.open_settings).pack(side="right")
+        ttk.Button(head, text="Settings", command=self.open_settings).pack(side="right")
 
         self.pages = {}
         send = ttk.Frame(main)
-        self.send_zone = DropZone(send, "Ordner mit Videos hierher ziehen", "Ordner auswählen …",
+        self.send_zone = DropZone(send, "Drag a folder with videos here", "Choose folder …",
                                   self._pick_send, self.drop_enabled, self.bg)
         self.send_zone.pack(fill="x", pady=(10, 6))
-        self.send_list = DeliveryList(send, self, SEND, "Noch nichts gesendet.", self.bg)
+        self.send_list = DeliveryList(send, self, SEND, "Nothing sent yet.", self.bg)
         self.send_list.pack(fill="both", expand=True)
         self.pages[SEND] = send
 
@@ -361,10 +361,10 @@ class App:
         self.recv_status.grid(row=0, column=0, sticky="w")
         self.recv_where = ttk.Label(top, style="Muted.TLabel", wraplength=380, justify="left")
         self.recv_where.grid(row=1, column=0, sticky="w")
-        self.recv_button = ttk.Button(top, text="Lieferung öffnen …", command=self._pick_delivery)
+        self.recv_button = ttk.Button(top, text="Open delivery …", command=self._pick_delivery)
         self.recv_button.grid(row=0, column=1, rowspan=2, sticky="e", padx=(8, 0))
         ttk.Separator(recv).pack(fill="x")
-        self.recv_list = DeliveryList(recv, self, RECEIVE, "Noch nichts empfangen.", self.bg)
+        self.recv_list = DeliveryList(recv, self, RECEIVE, "Nothing received yet.", self.bg)
         self.recv_list.pack(fill="both", expand=True)
         self.pages[RECEIVE] = recv
 
@@ -429,17 +429,17 @@ class App:
     def _show_receive_header(self) -> None:
         drive = self._watch_folder()
         if not self.cfg.auto_receive:
-            self.recv_status.configure(text="Automatisches Empfangen ist ausgeschaltet (Einstellungen).")
+            self.recv_status.configure(text="Automatic receiving is off (Settings).")
         elif drive is None:
-            self.recv_status.configure(text="Bitte zuerst den Cloud-Ordner wählen, damit neue "
-                                            "Lieferungen automatisch empfangen werden.")
+            self.recv_status.configure(text="Please choose the cloud folder first so that new "
+                                            "deliveries are received automatically.")
         else:
-            self.recv_status.configure(text="Neue Lieferungen werden automatisch empfangen.")
-        self.recv_where.configure(text=f"Ablage: {self.inbox()}")
+            self.recv_status.configure(text="New deliveries are received automatically.")
+        self.recv_where.configure(text=f"Saved to: {self.inbox()}")
         if self.cfg.auto_receive and drive is None:
             self.recv_button.configure(text=ACTIONS["choose_drive"], command=self._choose_drive_for_watch)
         else:
-            self.recv_button.configure(text="Lieferung öffnen …", command=self._pick_delivery)
+            self.recv_button.configure(text="Open delivery …", command=self._pick_delivery)
 
     def _choose_drive_for_watch(self) -> None:
         if self._drive_root(ask=True):
@@ -486,13 +486,13 @@ class App:
         if not ask and cur and Path(cur).is_dir():
             return Path(cur)
         if not ask and cur:
-            messagebox.showwarning(APP_NAME, f"Der Cloud-Ordner ist nicht erreichbar:\n{cur}\n\n"
-                                             "Läuft die Cloud-App? Sonst bitte den Ordner neu wählen.")
+            messagebox.showwarning(APP_NAME, f"The cloud folder cannot be reached:\n{cur}\n\n"
+                                             "Is the cloud app running? Otherwise please choose the folder again.")
         roots = find_drive_roots()
         if not ask and not cur and len(roots) == 1:
             chosen = roots[0]
         else:
-            chosen = self._ask_dir("Cloud-Ordner für die Lieferungen wählen",
+            chosen = self._ask_dir("Choose the cloud folder for deliveries",
                                    cur, *(str(r) for r in roots), str(default_cloudstorage_dir()))
             if chosen is None:
                 return None
@@ -503,13 +503,13 @@ class App:
     # ------------------------------------------------------------ input
     def _pick_send(self) -> None:
         self._reload_config()
-        p = self._ask_dir("Ordner zum Senden wählen", self.cfg.last_send_dir, str(Path.home()))
+        p = self._ask_dir("Choose a folder to send", self.cfg.last_send_dir, str(Path.home()))
         if p:
             self.handle_paths([str(p)])
 
     def _pick_delivery(self) -> None:
         self._reload_config()
-        p = self._ask_dir("Lieferung in der Cloud wählen", self.cfg.last_transfer_dir,
+        p = self._ask_dir("Choose a delivery in the cloud", self.cfg.last_transfer_dir,
                           self.cfg.drive_root, str(default_cloudstorage_dir()))
         if p:
             self.handle_paths([str(p)])
@@ -523,7 +523,7 @@ class App:
         folders = [p for p in paths if p.is_dir() and p not in deliveries]
         files = [p for p in paths if p.is_file()]
         if missing:
-            messagebox.showwarning(APP_NAME, "Nicht gefunden:\n" + "\n".join(p.name for p in missing))
+            messagebox.showwarning(APP_NAME, "Not found:\n" + "\n".join(p.name for p in missing))
         for p in deliveries:
             self.cfg.update(last_transfer_dir=str(p))
             self.start_receive(p)
@@ -564,10 +564,10 @@ class App:
         man = read_manifest(folder)
         if man is None:
             if auto or not messagebox.askyesno(APP_NAME, (
-                    f"Von „{folder.name}“ fehlt noch die Inhaltsliste.\n\n"
-                    "Meist ist die Lieferung einfach noch nicht ganz in der Cloud angekommen – "
-                    "dann bitte etwas warten.\n\nSoll trotzdem versucht werden, die Dateien "
-                    "wiederherzustellen (Notfall)?")):
+                    f"The content list of \"{folder.name}\" is still missing.\n\n"
+                    "Usually the delivery has simply not fully arrived in the cloud yet – "
+                    "then please wait a little.\n\nTry to restore the files anyway "
+                    "(emergency)?")):
                 return
             options["without_manifest"] = True
         man = man or {}
@@ -583,7 +583,7 @@ class App:
                          sender=man.get("sender"), size=man.get("source_bytes", 0),
                          files=len(man.get("files", [])), transfer_id=man.get("transfer_id"))
             self.history.add(d)
-        d.state, d.message, d.action, d.hint = QUEUED, "Wartet …", None, ""
+        d.state, d.message, d.action, d.hint = QUEUED, "Waiting …", None, ""
         self.history.save()
         self.refresh()
         self.submit(self._job_for(d))
@@ -603,7 +603,7 @@ class App:
             job = self.jobs.get(d.id)
             if job:
                 job.cancel.set()
-                d.message = "Wird angehalten …"
+                d.message = "Stopping …"
                 self._render(d)
             return
         if action == "reveal":
@@ -620,7 +620,7 @@ class App:
             self.start_receive(Path(d.sources[0]), offered=d)
             return
         if action == "choose_inbox":
-            new = self._ask_dir("Wo sollen empfangene Lieferungen gespeichert werden?", str(self.inbox()))
+            new = self._ask_dir("Where should received deliveries be saved?", str(self.inbox()))
             if not new:
                 return
             self.cfg.update(receive_dir=str(new))
@@ -631,7 +631,7 @@ class App:
         elif action == "fetch_missing":
             d.options.pop("salvage", None)
         # resume / retry / resend / fetch_missing / salvage / choose_inbox: run the job again
-        d.state, d.message, d.action, d.details, d.hint = QUEUED, "Wartet …", None, "", ""
+        d.state, d.message, d.action, d.details, d.hint = QUEUED, "Waiting …", None, "", ""
         self.history.save()
         self._render(d)
         self.submit(self._job_for(d))
@@ -650,16 +650,16 @@ class App:
     def free_drive(self, d: Delivery) -> None:
         size = f" ({human_bytes(d.size)})" if d.size else ""
         if not messagebox.askyesno(APP_NAME, (
-                f"„{d.name}“{size} aus der Cloud löschen?\n\n"
-                "Die empfangenen Dateien auf diesem Computer bleiben erhalten. Die Cloud gibt "
-                "den Platz frei, sobald auch ihr Papierkorb geleert ist.")):
+                f"Delete \"{d.name}\"{size} from the cloud?\n\n"
+                "The received files on this computer are kept. The cloud frees "
+                "the space once its trash is emptied as well.")):
             return
         try:
             watch.delete_delivery(Path(d.sources[0]), d.transfer_id)
         except (watch.NotADeliveryError, OSError) as exc:
             log.warning("Freeing Drive space failed: %s", exc)
-            messagebox.showwarning(APP_NAME, "Der Ordner in der Cloud enthält auch andere Dateien "
-                                             "oder ist nicht erreichbar und wurde deshalb nicht gelöscht.")
+            messagebox.showwarning(APP_NAME, "The folder in the cloud contains other files as well "
+                                             "or cannot be reached, so it was not deleted.")
             return
         d.options["deleted"] = True
         d.hint = DELETED_HINT
@@ -672,8 +672,8 @@ class App:
         win.geometry("600x340")
         text = tk.Text(win, wrap="word", font=("Menlo", 11) if IS_MAC else ("Consolas", 9))
         info = "\n".join(filter(None, [
-            f"Lieferung: {d.name}", f"Quelle: {', '.join(d.sources)}", f"Ziel: {d.target or '-'}",
-            f"Ergebnis: {d.result}" if d.result else "", f"Status: {d.state}", "", d.details]))
+            f"Delivery: {d.name}", f"Source: {', '.join(d.sources)}", f"Target: {d.target or '-'}",
+            f"Result: {d.result}" if d.result else "", f"Status: {d.state}", "", d.details]))
         text.insert("1.0", info)
         text.configure(state="disabled")
         text.pack(fill="both", expand=True, padx=8, pady=8)
@@ -684,12 +684,12 @@ class App:
             win.clipboard_clear()
             win.clipboard_append(info)
 
-        ttk.Button(bar, text="Details kopieren", command=copy).pack(side="left")
-        ttk.Button(bar, text="Schließen", command=win.destroy).pack(side="right")
+        ttk.Button(bar, text="Copy details", command=copy).pack(side="left")
+        ttk.Button(bar, text="Close", command=win.destroy).pack(side="right")
 
     # ------------------------------------------------------------ watching the Drive folder
     def _update_watch(self) -> None:
-        """Watch the Drive folder only in mode "Empfangen" with automatic receiving on."""
+        """Watch the Drive folder only in mode "Receive" with automatic receiving on."""
         self._show_receive_header()
         folder = self._watch_folder() if self.cfg.auto_receive and self.mode_var.get() == RECEIVE else None
         self._watch_root = folder
@@ -732,8 +732,8 @@ class App:
                 self.history.add(Delivery(
                     RECEIVE, f.name, [str(f.folder)], None, state=OFFERED, sender=f.sender, size=f.size,
                     files=f.files, transfer_id=f.transfer_id, action="receive_now",
-                    message=("Von diesem Computer gesendet – nicht automatisch empfangen."
-                             if f.transfer_id in own else "Lag schon vorher in der Cloud – noch nicht empfangen.")))
+                    message=("Sent from this computer – not received automatically."
+                             if f.transfer_id in own else "Was already in the cloud before – not received yet.")))
                 changed = True
                 continue
             log.info("New delivery %s from %s - receiving automatically", f.name, f.sender)
@@ -749,7 +749,7 @@ class App:
                 if card and d.state == RUNNING:
                     card.set_incoming(f.percent)
                 elif card and d.state == OFFERED and not f.complete:
-                    card.status.configure(text=f"Wird noch hochgeladen ({f.percent} %) – noch nicht empfangen.")
+                    card.status.configure(text=f"Still uploading ({f.percent} %) – not received yet.")
 
     def _maybe_complete(self, f: watch.Found) -> None:
         """An incomplete delivery is fetched again as soon as more packets have arrived."""
@@ -822,7 +822,7 @@ class App:
     def _on_started(self, job: Job) -> None:
         self.running = job
         if job.kind == VERIFY:
-            self.root.title(f"{APP_NAME} – „{job.name}“ wird geprüft …")
+            self.root.title(f"{APP_NAME} – verifying \"{job.name}\" …")
         d = self.history.get(job.delivery_id) if job.delivery_id else None
         if d:
             d.state, d.message = RUNNING, running_text(d.kind, 0, 0, "", Eta())
@@ -873,29 +873,29 @@ class App:
             d.result, d.size, d.files = str(result.target), result.source_bytes, len(result.files)
             d.transfer_id = result.transfer_id
             d.hint = SENT_HINT
-            desktop.notify(APP_NAME, f"„{d.name}“ liegt in der Cloud.")
+            desktop.notify(APP_NAME, f"\"{d.name}\" is in the cloud.")
         else:
             d.result, d.sender = str(result.dest), result.sender or d.sender
             d.size, d.files = result.bytes or d.size, result.files
             notes = []
             if result.repaired_stripes:
-                notes.append("Beschädigte Teile wurden automatisch repariert.")
+                notes.append("Damaged parts were repaired automatically.")
             if result.renamed:
-                notes.append(f"{len(result.renamed)} Dateiname(n) wurden für diesen Computer angepasst.")
+                notes.append(f"{len(result.renamed)} file name(s) were adjusted for this computer.")
             if result.without_manifest:
-                notes.append("Ohne Inhaltsliste wiederhergestellt – ob etwas fehlt, lässt sich nicht prüfen.")
+                notes.append("Restored without a content list – whether anything is missing cannot be checked.")
             d.hint = " ".join(notes)
             if result.complete:
                 d.state, d.action, d.finished = DONE, "reveal", now_iso()
-                desktop.notify(APP_NAME, f"„{d.name}“ ist angekommen.")
+                desktop.notify(APP_NAME, f"\"{d.name}\" has arrived.")
             else:
                 n = len(result.missing)
                 d.state, d.action = INCOMPLETE, "fetch_missing"
-                d.message = ("1 Datei fehlt noch" if n == 1 else f"{n} Dateien fehlen noch") + \
-                    " – bitte auf dem sendenden Mac noch einmal senden."
+                d.message = ("1 file is still missing" if n == 1 else f"{n} files are still missing") + \
+                    " – please send again on the sending Mac."
                 found = self.found.get(d.sources[0])
                 d.options["packets_seen"] = found.present if found else -1
-                desktop.notify(APP_NAME, f"„{d.name}“: Es fehlen noch Dateien.")
+                desktop.notify(APP_NAME, f"\"{d.name}\": files are still missing.")
         self.history.save()
         self._render(d)
 
@@ -922,8 +922,8 @@ class App:
     # ------------------------------------------------------------ closing
     def _on_close(self) -> None:
         if self.running is not None or not self.queue.empty():
-            if not messagebox.askyesno(APP_NAME, "Es wird gerade gesendet oder empfangen. Trotzdem beenden?\n\n"
-                                                 "Beim nächsten Start kann es dort weitergehen, wo es aufgehört hat."):
+            if not messagebox.askyesno(APP_NAME, "Sending or receiving is in progress. Quit anyway?\n\n"
+                                                 "On the next start it can continue where it stopped."):
                 return
             self.closing = True
             for job in list(self.jobs.values()):
@@ -943,67 +943,67 @@ class SettingsWindow:
         app._reload_config()
         cfg = app.cfg
         win = self.win = tk.Toplevel(app.root)
-        win.title("Einstellungen")
+        win.title("Settings")
         win.transient(app.root)
         win.resizable(False, False)
         f = ttk.Frame(win, padding=14)
         f.pack(fill="both", expand=True)
         f.columnconfigure(1, weight=1)
 
-        ttk.Label(f, text="Name dieses Computers").grid(row=0, column=0, sticky="w")
+        ttk.Label(f, text="Name of this computer").grid(row=0, column=0, sticky="w")
         self.name_var = tk.StringVar(value=cfg.sender_name or "")
         ttk.Entry(f, textvariable=self.name_var, width=26).grid(row=0, column=1, sticky="we", padx=(12, 0))
-        ttk.Label(f, text=f"Wird beim Empfänger angezeigt. Leer = „{desktop.computer_name()}“.",
+        ttk.Label(f, text=f"Shown to the receiver. Empty = \"{desktop.computer_name()}\".",
                   style="Muted.TLabel").grid(row=1, column=1, sticky="w", padx=(12, 0))
 
-        self.drive_var = tk.StringVar(value=cfg.drive_root or "(wird beim ersten Senden gesucht)")
-        self._path_row(f, 2, "Cloud-Ordner", self.drive_var, self._change_drive)
+        self.drive_var = tk.StringVar(value=cfg.drive_root or "(found on the first send)")
+        self._path_row(f, 2, "Cloud folder", self.drive_var, self._change_drive)
         self.inbox_var = tk.StringVar(value=str(app.inbox()))
-        self._path_row(f, 3, "Empfangene Lieferungen in", self.inbox_var, self._change_inbox)
+        self._path_row(f, 3, "Save received deliveries in", self.inbox_var, self._change_inbox)
         checks = ttk.Frame(f)
         checks.grid(row=4, column=0, columnspan=3, sticky="w", pady=(10, 0))
         self.auto_var = tk.BooleanVar(value=cfg.auto_receive)
-        ttk.Checkbutton(checks, text="Im Modus „Empfangen“ neue Lieferungen automatisch empfangen",
+        ttk.Checkbutton(checks, text="Receive new deliveries automatically in mode \"Receive\"",
                         variable=self.auto_var).pack(anchor="w")
         self.login_var = tk.BooleanVar(value=desktop.launch_at_login_enabled())
         if IS_MAC:
-            ttk.Checkbutton(checks, text="Beim Anmelden automatisch starten",
+            ttk.Checkbutton(checks, text="Start automatically at login",
                             variable=self.login_var).pack(anchor="w")
 
         ttk.Separator(f).grid(row=5, column=0, columnspan=3, sticky="we", pady=10)
         tools = ttk.Frame(f)
         tools.grid(row=6, column=0, columnspan=3, sticky="w")
-        ttk.Button(tools, text="Lieferung prüfen …", command=self._verify).pack(side="left")
-        ttk.Button(tools, text="Protokoll öffnen",
+        ttk.Button(tools, text="Verify delivery …", command=self._verify).pack(side="left")
+        ttk.Button(tools, text="Open log",
                    command=lambda: desktop.open_path(log_dir())).pack(side="left", padx=6)
-        ttk.Button(tools, text="Erledigte aus der Liste entfernen", command=self._clean).pack(side="left")
+        ttk.Button(tools, text="Remove finished from list", command=self._clean).pack(side="left")
 
         self.adv_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(f, text="Erweitert", variable=self.adv_var, command=self._toggle_adv).grid(
+        ttk.Checkbutton(f, text="Advanced", variable=self.adv_var, command=self._toggle_adv).grid(
             row=7, column=0, sticky="w", pady=(10, 0))
         self.adv = ttk.Frame(f)
         self.vars = {}
         for i, (key, label, lo, hi) in enumerate((
-                ("k", "Datenpakete je Gruppe (k)", 1, 99), ("m", "Reservepakete je Gruppe (m)", 0, 50),
-                ("block_mib", "Paketgröße in MiB", 1, 512), ("zstd_level", "Kompression (0 = aus)", 0, 19))):
+                ("k", "Data packets per group (k)", 1, 99), ("m", "Spare packets per group (m)", 0, 50),
+                ("block_mib", "Packet size in MiB", 1, 512), ("zstd_level", "Compression (0 = off)", 0, 19))):
             ttk.Label(self.adv, text=label).grid(row=i, column=0, sticky="w")
             var = tk.IntVar(value=getattr(cfg, key))
             ttk.Spinbox(self.adv, from_=lo, to=hi, textvariable=var, width=6).grid(row=i, column=1, sticky="w", padx=8)
             self.vars[key] = var
-        ttk.Label(self.adv, text="Nur ändern, wenn nötig. Gilt für neue Lieferungen.",
+        ttk.Label(self.adv, text="Change only if needed. Applies to new deliveries.",
                   style="Muted.TLabel").grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         bottom = ttk.Frame(f)
         bottom.grid(row=9, column=0, columnspan=3, sticky="we", pady=(14, 0))
         ttk.Label(bottom, text=f"Version {__version__}", style="Muted.TLabel").pack(side="left")
-        ttk.Button(bottom, text="Fertig", command=self.close).pack(side="right")
+        ttk.Button(bottom, text="Done", command=self.close).pack(side="right")
         win.protocol("WM_DELETE_WINDOW", self.close)
 
     def _path_row(self, f, row, label, var, command) -> None:
         ttk.Label(f, text=label).grid(row=row, column=0, sticky="w", pady=(8, 0))
         ttk.Label(f, textvariable=var, style="Muted.TLabel").grid(row=row, column=1, sticky="w",
                                                                    padx=(12, 0), pady=(8, 0))
-        ttk.Button(f, text="Ändern …", command=command).grid(row=row, column=2, sticky="e", pady=(8, 0))
+        ttk.Button(f, text="Change …", command=command).grid(row=row, column=2, sticky="e", pady=(8, 0))
 
     def _toggle_adv(self) -> None:
         if self.adv_var.get():
@@ -1017,14 +1017,14 @@ class SettingsWindow:
             self.drive_var.set(str(chosen))
 
     def _change_inbox(self) -> None:
-        new = self.app._ask_dir("Wo sollen empfangene Lieferungen gespeichert werden?", str(self.app.inbox()))
+        new = self.app._ask_dir("Where should received deliveries be saved?", str(self.app.inbox()))
         if new:
             self.app.cfg.update(receive_dir=str(new))
             self.inbox_var.set(str(new))
             self.app._show_receive_header()
 
     def _verify(self) -> None:
-        p = self.app._ask_dir("Lieferung zum Prüfen wählen", self.app.cfg.last_transfer_dir,
+        p = self.app._ask_dir("Choose a delivery to verify", self.app.cfg.last_transfer_dir,
                               self.app.cfg.drive_root, str(default_cloudstorage_dir()))
         if p:
             self.app.start_verify(p)
@@ -1042,7 +1042,7 @@ class SettingsWindow:
             SendOptions(k=values["k"], m=values["m"], block_size=values["block_mib"] * MIB,
                         zstd_level=values["zstd_level"]).validate()
         except (ValueError, tk.TclError) as exc:
-            messagebox.showerror("Einstellungen", f"Ungültige Werte unter „Erweitert“: {exc}", parent=self.win)
+            messagebox.showerror("Settings", f"Invalid values under \"Advanced\": {exc}", parent=self.win)
             return
         changes.update(values)
         self.app.cfg.update(**changes)

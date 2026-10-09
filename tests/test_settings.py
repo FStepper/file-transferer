@@ -197,16 +197,16 @@ def test_finished_jobs_update_cards(app, tmp_path):
     a.handle_paths([str(shoot)])
     job = a.submitted[0]
     d = a.history.get(job.delivery_id)
-    assert d.state == QUEUED and a._card(d).button.cget("text") == "Stopp"
+    assert d.state == QUEUED and a._card(d).button.cget("text") == "Stop"
 
     a._on_started(job)
-    a._on_progress(job, 50, 100, "Stripe 1: Parität wird berechnet …")
+    a._on_progress(job, 50, 100, "Stripe 1: computing parity …")
     status = a._card(d).status.cget("text")
-    assert status.startswith("Wird vorbereitet – 50 %") and "Stripe" not in status
+    assert status.startswith("Preparing – 50 %") and "Stripe" not in status
 
     result = SimpleNamespace(target=target / "Drehtag 3", source_bytes=100, files=[{}, {}], transfer_id="t1")
     a._on_finished(job, result, None)
-    assert d.state == DONE and a._card(d).status.cget("text").startswith("✔ Liegt in der Cloud")
+    assert d.state == DONE and a._card(d).status.cget("text").startswith("✔ In the cloud")
     assert not a._card(d).button.winfo_ismapped()
 
 
@@ -218,8 +218,8 @@ def test_errors_become_plain_language_with_one_action(app, tmp_path):
     folder = delivery_folder(tmp_path / "Drive", "Shoot")
     for exc, state, action, words in (
             (InsufficientSpaceError(50 << 30, 15 << 30), FAILED, "choose_inbox", "35.0 GB"),
-            (StripeUnavailableError(2, 8, 10, True), FAILED, "salvage", "fehlt"),
-            (Cancelled(), PAUSED, "resume", "Pausiert")):
+            (StripeUnavailableError(2, 8, 10, True), FAILED, "salvage", "missing"),
+            (Cancelled(), PAUSED, "resume", "Paused")):
         a.history.items.clear()
         a.submitted.clear()
         a.handle_paths([str(folder)])
@@ -245,7 +245,7 @@ def test_incomplete_receive_asks_to_send_again(app, tmp_path):
     a._on_finished(job, res, None)
     d = a.history.get(job.delivery_id)
     assert d.state == INCOMPLETE and d.action == "fetch_missing"
-    assert "2 Dateien fehlen" in d.message and "noch einmal senden" in d.message
+    assert "2 files are still missing" in d.message and "send again" in d.message
 
     a.run_action(d, "fetch_missing")               # after the sender sent again
     assert d.state == QUEUED and a.submitted[-1].options.get("salvage") is None

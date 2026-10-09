@@ -39,8 +39,8 @@ def _resolve_drive(arg: str | None) -> Path:
     if len(roots) == 1:
         return roots[0]
     if not roots:
-        raise SystemExit("Cloud-Ordner (Google Drive) nicht gefunden – bitte mit --drive angeben.")
-    raise SystemExit("Mehrere Cloud-Ordner gefunden, bitte mit --drive wählen:\n  "
+        raise SystemExit("Cloud folder (Google Drive) not found – please pass it with --drive.")
+    raise SystemExit("Several cloud folders found, please choose one with --drive:\n  "
                      + "\n  ".join(map(str, roots)))
 
 
@@ -54,9 +54,9 @@ def cmd_send(a) -> int:
     if a.block_mib:
         opts.block_size = a.block_mib * MIB
     res = send_folder(Path(a.source), _resolve_drive(a.drive), opts, _console_progress())
-    print(f"\nZiel: {res.target}\n{human_bytes(res.source_bytes)} → {human_bytes(res.stream_bytes)} "
-          f"komprimiert, {res.stripes} Stripes, {res.packets_written} Pakete geschrieben, "
-          f"{res.packets_skipped} übersprungen")
+    print(f"\nTarget: {res.target}\n{human_bytes(res.source_bytes)} → {human_bytes(res.stream_bytes)} "
+          f"compressed, {res.stripes} stripes, {res.packets_written} packets written, "
+          f"{res.packets_skipped} skipped")
     return 0
 
 
@@ -68,10 +68,10 @@ def cmd_receive(a) -> int:
         res = receive_folder(Path(a.folder), Path(a.dest), _console_progress(), wait=not a.no_wait,
                              only=a.only, salvage=a.salvage, without_manifest=a.without_manifest)
     except StripeUnavailableError as exc:
-        print(f"\nFehler: {exc}", file=sys.stderr)
+        print(f"\nError: {exc}", file=sys.stderr)
         if exc.upload_complete:
-            print("Teile des Transfers fehlen endgültig. Mit --salvage wird alles andere "
-                  "wiederhergestellt.", file=sys.stderr)
+            print("Parts of the transfer are lost for good. --salvage restores everything "
+                  "else.", file=sys.stderr)
         return 2
     print("\n" + receive_summary(res))
     return 0 if res.complete else 2
@@ -92,14 +92,14 @@ def cmd_list(a) -> int:
 
     man, files = list_transfer(Path(a.folder))
     if not man:
-        print("Kein gültiges Manifest gefunden.")
+        print("No valid manifest found.")
         return 1
-    state = {True: "ok", False: "FEHLT", None: "?"}
+    state = {True: "ok", False: "LOST", None: "?"}
     for f in files:
         print(f"{state[f.available]:>5}  {human_bytes(f.size):>10}  {f.compression:>4}  {f.path}")
     missing = sum(f.available is False for f in files)
-    print(f"{len(files)} Dateien, {human_bytes(sum(f.size for f in files))}"
-          + (f", {missing} derzeit nicht wiederherstellbar" if missing else ""))
+    print(f"{len(files)} files, {human_bytes(sum(f.size for f in files))}"
+          + (f", {missing} currently not recoverable" if missing else ""))
     return 0 if not missing else 2
 
 
@@ -108,17 +108,17 @@ def cmd_status(a) -> int:
 
     man, stripes = transfer_status(Path(a.folder))
     if not man:
-        print("Kein gültiges Manifest gefunden.")
+        print("No valid manifest found.")
         return 1
     p = man["params"]
     print(f"{man['name']}  [{man['status']}]  k={p['k']} m={p['m']} "
-          f"Paket={human_bytes(p['block_size'])}  Quelle={human_bytes(man['source_bytes'])}")
+          f"packet={human_bytes(p['block_size'])}  source={human_bytes(man['source_bytes'])}")
     bad = [s for s in stripes if not s.recoverable]
     full = sum(s.present == s.total for s in stripes)
-    print(f"{len(stripes)} Stripes: {full} vollständig, {len(stripes) - full - len(bad)} reparierbar, "
-          f"{len(bad)} nicht (noch nicht) wiederherstellbar")
+    print(f"{len(stripes)} stripes: {full} complete, {len(stripes) - full - len(bad)} repairable, "
+          f"{len(bad)} not (yet) recoverable")
     for s in bad[:30]:
-        print(f"  Stripe {s.stripe + 1}: {s.present}/{s.needed} benötigte Pakete")
+        print(f"  Stripe {s.stripe + 1}: {s.present}/{s.needed} needed packets")
     return 0 if not bad and man["status"] == "complete" else 2
 
 
@@ -147,7 +147,7 @@ def cmd_config(a) -> int:
     if a.drive is not None:
         drive = Path(a.drive).expanduser()
         if not drive.is_dir():
-            print(f"Fehler: Ordner nicht gefunden: {drive}", file=sys.stderr)
+            print(f"Error: folder not found: {drive}", file=sys.stderr)
             return 1
         changes["drive_root"] = str(drive)
     if a.sender is not None:
@@ -164,7 +164,7 @@ def cmd_config(a) -> int:
         if desktop.IS_MAC:
             desktop.set_launch_at_login(a.login == "on")
         else:
-            print("Hinweis: Start beim Anmelden gibt es nur unter macOS.", file=sys.stderr)
+            print("Note: start at login is only available on macOS.", file=sys.stderr)
     if not changes and a.login is None:
         for key in ("drive_root", "sender_name", "receive_dir", "mode", "auto_receive"):
             print(f"{key} = {getattr(cfg, key)}")
@@ -186,58 +186,58 @@ def main(argv: list[str] | None = None) -> int:
         from vidtransfer.gui import run_gui
         return run_gui(argv)
 
-    ap = argparse.ArgumentParser(prog="vidtransfer", description="Fehlertolerante Übertragung über die Cloud")
+    ap = argparse.ArgumentParser(prog="vidtransfer", description="Fault-tolerant transfer via a cloud folder")
     ap.add_argument("--version", action="version", version=__version__)
     ap.add_argument("-v", "--verbose", action="store_true")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("send", help="Ordner paketieren und in den Cloud-Ordner schreiben")
+    s = sub.add_parser("send", help="pack a folder and write it to the cloud folder")
     s.add_argument("source")
-    s.add_argument("--drive", help="Cloud-Ordner (Standard: Google Drive, automatisch gefunden)")
-    s.add_argument("--k", type=int, help="Datenpakete pro Stripe (Standard 10)")
-    s.add_argument("--m", type=int, help="Paritätspakete pro Stripe (Standard 3)")
-    s.add_argument("--block-mib", type=int, help="Paketgröße in MiB (Standard 32)")
-    s.add_argument("--zstd-level", type=int, help="0 = keine Kompression (Standard 3)")
+    s.add_argument("--drive", help="cloud folder (default: Google Drive, found automatically)")
+    s.add_argument("--k", type=int, help="data packets per stripe (default 10)")
+    s.add_argument("--m", type=int, help="parity packets per stripe (default 3)")
+    s.add_argument("--block-mib", type=int, help="packet size in MiB (default 32)")
+    s.add_argument("--zstd-level", type=int, help="0 = no compression (default 3)")
     s.set_defaults(func=cmd_send)
 
-    r = sub.add_parser("receive", help="Transfer-Ordner prüfen, reparieren und entpacken "
-                                       "(setzt einen abgebrochenen Empfang automatisch fort)")
+    r = sub.add_parser("receive", help="verify, repair and unpack a transfer folder "
+                                       "(resumes an interrupted receive automatically)")
     r.add_argument("folder")
-    r.add_argument("dest", help="Zielverzeichnis (darin wird der Ordner angelegt)")
-    r.add_argument("--no-wait", action="store_true", help="nicht auf fehlende Pakete warten")
-    r.add_argument("--only", action="append", metavar="MUSTER",
-                   help="nur passende Dateien, z. B. \"Audio/*.wav\" oder \"clip01.mp4\" (mehrfach möglich)")
+    r.add_argument("dest", help="target directory (the folder is created inside it)")
+    r.add_argument("--no-wait", action="store_true", help="do not wait for missing packets")
+    r.add_argument("--only", action="append", metavar="PATTERN",
+                   help="only matching files, e.g. \"Audio/*.wav\" or \"clip01.mp4\" (repeatable)")
     r.add_argument("--salvage", action="store_true",
-                   help="bei endgültig fehlenden Teilen alles andere wiederherstellen (Ordner \"… (incomplete)\")")
+                   help="if parts are lost for good, restore everything else (folder \"… (incomplete)\")")
     r.add_argument("--without-manifest", action="store_true",
-                   help="Notfall: ohne Manifest nur aus den Paketen wiederherstellen")
+                   help="emergency: restore from the packets alone, without a manifest")
     r.set_defaults(func=cmd_receive)
 
-    v = sub.add_parser("verify", help="alle Pakete und den Inhalt prüfen, ohne zu entpacken")
+    v = sub.add_parser("verify", help="check all packets and the content without unpacking")
     v.add_argument("folder")
-    v.add_argument("--quick", action="store_true", help="nur Pakete prüfen, Inhalt nicht dekodieren")
-    v.add_argument("--without-manifest", action="store_true", help="Notfall: ohne Manifest prüfen")
+    v.add_argument("--quick", action="store_true", help="check packets only, do not decode the content")
+    v.add_argument("--without-manifest", action="store_true", help="emergency: verify without a manifest")
     v.set_defaults(func=cmd_verify)
 
-    ls = sub.add_parser("list", help="Dateien eines Transfers anzeigen (lädt nichts)")
+    ls = sub.add_parser("list", help="show the files of a transfer (downloads nothing)")
     ls.add_argument("folder")
     ls.set_defaults(func=cmd_list)
 
-    st = sub.add_parser("status", help="schneller Überblick über einen Transfer-Ordner (lädt nichts)")
+    st = sub.add_parser("status", help="quick overview of a transfer folder (downloads nothing)")
     st.add_argument("folder")
     st.set_defaults(func=cmd_status)
 
-    c = sub.add_parser("config", help="Einstellungen anzeigen oder setzen (z. B. für das Installationsskript)")
-    c.add_argument("--list-drives", action="store_true", help="gefundene Cloud-Ordner (Google Drive) auflisten")
-    c.add_argument("--get", choices=["drive", "sender", "inbox", "mode", "login"], help="einen Wert ausgeben")
-    c.add_argument("--drive", help="Cloud-Ordner für die Lieferungen")
-    c.add_argument("--sender", help="Name dieses Computers (leer = Computername)")
-    c.add_argument("--inbox", help="Ablage für empfangene Lieferungen")
-    c.add_argument("--mode", choices=["send", "receive"], help="Modus beim Start")
-    c.add_argument("--login", choices=["on", "off"], help="beim Anmelden starten (macOS)")
+    c = sub.add_parser("config", help="show or change settings (e.g. for the install script)")
+    c.add_argument("--list-drives", action="store_true", help="list the cloud folders found (Google Drive)")
+    c.add_argument("--get", choices=["drive", "sender", "inbox", "mode", "login"], help="print one value")
+    c.add_argument("--drive", help="cloud folder for deliveries")
+    c.add_argument("--sender", help="name of this computer (empty = computer name)")
+    c.add_argument("--inbox", help="folder for received deliveries")
+    c.add_argument("--mode", choices=["send", "receive"], help="mode at start")
+    c.add_argument("--login", choices=["on", "off"], help="start at login (macOS)")
     c.set_defaults(func=cmd_config)
 
-    g = sub.add_parser("gui", help="Fenster öffnen")
+    g = sub.add_parser("gui", help="open the window")
     g.add_argument("paths", nargs="*")
     g.set_defaults(func=None)
 
@@ -249,11 +249,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return a.func(a)
     except KeyboardInterrupt:
-        print("\nAbgebrochen.")
+        print("\nCancelled.")
         return 130
     except Cancelled:
         return 130
     except Exception as exc:  # noqa: BLE001 – print readable message for the console
         logging.getLogger(__name__).exception("Command %s failed", a.cmd)
-        print(f"\nFehler: {exc}", file=sys.stderr)
+        print(f"\nError: {exc}", file=sys.stderr)
         return 1

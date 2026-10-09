@@ -6,52 +6,50 @@ an unstable connection. The folder is split into packets with
 Reed-Solomon parity. If packets go missing or arrive damaged, the receiver
 reconstructs them automatically, and every file is verified with SHA-256 at the end.
 
-> The app's user interface is in German; this documentation is in English.
-
 ## Usage
 
-The window has a switch at the top: **Senden | Empfangen**. The app remembers the
+The window has a switch at the top: **Send | Receive**. The app remembers the
 last mode. Each mode shows one drop zone and the list of deliveries; every
 delivery has one status line and at most one button. Everything else is in
-**Einstellungen** (computer name, cloud folder, inbox, verifying a
+**Settings** (computer name, cloud folder, inbox, verifying a
 delivery, log, advanced parameters).
 
 **Sending**
 1. Drag a folder (e.g. `Shoot Day 3`) onto the window or onto the VidTransfer
-   icon in the Dock – or click **„Ordner auswählen …“**. Loose files can be
+   icon in the Dock – or click **Choose folder …**. Loose files can be
    dropped too; they become one delivery called `Files <date>`.
-2. The card shows *Wird vorbereitet – 45 % · noch ca. 6 Min.*
-3. When it says **✔ Liegt in der Cloud**, the app's job is done. The cloud client
+2. The card shows *Preparing – 45 % · about 6 min left*
+3. When it says **✔ In the cloud**, the app's job is done. The cloud client
    (Google Drive) then uploads in the background – the Mac should stay online until
    it shows the folder as synced. The app keeps the Mac awake only while it is preparing.
 
-Something went wrong (crash, restart, folder changed)? Click **Fortsetzen** or
-**Erneut senden** on the card, or drop the same folder again. Existing packets are
+Something went wrong (crash, restart, folder changed)? Click **Resume** or
+**Send again** on the card, or drop the same folder again. Existing packets are
 skipped and damaged ones replaced.
 
 **Receiving**
-1. Switch to **Empfangen** – that is all. The app watches the cloud folder
+1. Switch to **Receive** – that is all. The app watches the cloud folder
    and receives every new delivery **automatically** into the inbox, by default
    `~/Movies/VidTransfer` (changeable in the settings). The card shows who sent it.
-2. While the sender is still uploading, the card says *Wird noch hochgeladen
+2. While the sender is still uploading, the card says *Still uploading
    (35 %)*; receiving runs alongside and waits for the rest.
 3. The app verifies the packets, repairs missing ones, unpacks everything and
    verifies every file.
-4. **✔ Angekommen** – **„Im Finder zeigen“** opens the folder. The link
-   **„Platz in der Cloud freigeben“** deletes the delivery from the cloud folder
+4. **✔ Received** – **Show in Finder** opens the folder. The link
+   **Free up cloud space** deletes the delivery from the cloud folder
    (after asking; the received files stay). Google Drive frees the space once its
    trash is emptied.
 
 Deliveries that were already in the cloud folder before automatic receiving was used
 for the first time, and deliveries sent from this computer, are not fetched
-unasked – they appear as cards with a button **„Empfangen“**. A delivery can also
-be opened by hand with **„Lieferung öffnen …“** or by dragging it onto the window.
+unasked – they appear as cards with a button **Receive**. A delivery can also
+be opened by hand with **Open delivery …** or by dragging it onto the window.
 Automatic receiving can be switched off in the settings.
 
 Problems are shown in one plain sentence with one button that helps, e.g.
-*„Der Cloud-Ordner ist nicht erreichbar. Läuft die Cloud-App?“* →
-**Cloud-App starten** (starts Google Drive on the Mac), or *„Auf diesem Computer fehlen 35 GB Speicherplatz.“* →
-**Anderen Speicherort wählen**. The technical details are behind „Details“
+*"The cloud folder cannot be reached. Is the cloud app running?"* →
+**Start cloud app** (starts Google Drive on the Mac), or *"This computer needs 35 GB more free space."* →
+**Choose another location**. The technical details are behind "Details"
 (or right-click on a card).
 
 How unpacking stays safe:
@@ -60,7 +58,7 @@ How unpacking stays safe:
 - Each file is first written as a hidden `.<name>.vtpart` and only gets its real
   name once its SHA-256 matches. A half-written or corrupt file never appears under
   its real name.
-- **Interrupted?** (stopped, crash, Mac switched off) Click **Fortsetzen**. The app
+- **Interrupted?** (stopped, crash, Mac switched off) Click **Resume**. The app
   jumps straight to the first unfinished file; finished files and the packets
   before it are not read again.
 - Before anything is written, the app checks that there is **enough free space**.
@@ -77,8 +75,8 @@ does not have them), automatic receiving restores everything else into a folder
 `Shoot Day 3 (incomplete)`. The card says how many files are missing and asks to
 send the folder again on the sending Mac (only the missing packets are written).
 As soon as they have arrived, the app completes the delivery by itself and renames
-the folder to `Shoot Day 3` (or click **Fehlende Dateien holen**). For deliveries
-opened by hand, the card offers **Alles andere jetzt holen**.
+the folder to `Shoot Day 3` (or click **Get missing files**). For deliveries
+opened by hand, the card offers **Get everything else now**.
 
 If the content list (manifest) of a delivery is unreadable, the app offers an
 emergency recovery from the packets alone. Every restored file is still
@@ -86,7 +84,7 @@ verified, but the app cannot tell whether files are missing.
 
 **Verify only**
 
-**Einstellungen → „Lieferung prüfen …“** (or `vidtransfer verify`) downloads and
+**Settings → Verify delivery …** (or `vidtransfer verify`) downloads and
 checks all packets and the whole content, without unpacking anything. It reports
 whether the delivery is completely recoverable.
 
@@ -98,11 +96,11 @@ whether the delivery is completely recoverable.
 
 The cloud folder defaults to the Google Drive folder found on the computer, but it
 can be any folder – another sync client's folder, or a local one for testing: in
-**Einstellungen**, click **„Ändern …“** next to „Cloud-Ordner“ and choose any local
+**Settings**, click **Change …** next to "Cloud folder" and choose any local
 folder, e.g. `D:\VidTransfer-Test`. The app keeps that choice and never switches
 back to the Drive folder by itself. Sending writes the delivery folder there. In
-mode „Empfangen“ the app watches the same folder; deliveries sent from this
-computer appear as cards with **„Empfangen“** (they are not fetched unasked).
+mode "Receive" the app watches the same folder; deliveries sent from this
+computer appear as cards with **Receive** (they are not fetched unasked).
 
 Every folder dialog remembers the folder that was opened last. On the command
 line, the target is given with `--drive`:
@@ -237,8 +235,7 @@ not cross-compile. There are two ways:
   The ZIPs for arm64 and x86_64 are then available as artifacts.
 - Run `./packaging/build_mac.sh` on the M2.
 
-Conventions: code comments, docstrings, log messages and generated files are in
-English; texts shown to the user (GUI, CLI output, error messages, macOS permission
-prompts) are in German.
+Conventions: everything is in English – the user interface, CLI output, code,
+docs and generated files. There is no translation layer.
 
 The design is described in [PLAN.md](PLAN.md).

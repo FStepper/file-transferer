@@ -67,9 +67,9 @@ class SendOptions:
 
     def validate(self) -> None:
         if not (1 <= self.k <= 99 and 0 <= self.m <= 99 and self.k + self.m <= 100):
-            raise ValueError("k/m außerhalb des erlaubten Bereichs (k+m ≤ 100)")
+            raise ValueError("k/m out of the allowed range (k+m ≤ 100)")
         if self.block_size < 4096:
-            raise ValueError("Blockgröße zu klein")
+            raise ValueError("Block size too small")
         if self.format_version not in (1, 2):
             raise ValueError(f"unbekanntes Format {self.format_version}")
 
@@ -311,7 +311,7 @@ class SourceMissingError(FileNotFoundError):
 def _check_drive_root(drive_root: Path) -> Path:
     drive_root = Path(drive_root)
     if not drive_root.is_dir():
-        raise DriveFolderMissingError(f"Cloud-Ordner {drive_root} nicht gefunden")
+        raise DriveFolderMissingError(f"Cloud folder {drive_root} not found")
     return drive_root
 
 
@@ -326,11 +326,11 @@ def send_folder(
     """Send one folder; the delivery gets the folder's name."""
     src = Path(src).resolve()
     if not src.is_dir():
-        raise SourceMissingError(f"Ordner {src} nicht gefunden")
+        raise SourceMissingError(f"Folder {src} not found")
     drive_root = _check_drive_root(drive_root)
     if drive_root.resolve() == src or src in drive_root.resolve().parents:
-        raise ValueError("Der Cloud-Ordner darf nicht im Quellordner liegen")
-    progress(0, 0, "Ordner wird eingelesen …")
+        raise ValueError("The cloud folder must not be inside the source folder")
+    progress(0, 0, "Reading folder …")
     return _send(src.name, scan_source(src), drive_root, opts, progress, cancel, sender, str(src))
 
 
@@ -350,7 +350,7 @@ def send_files(
     for f in files:
         f = Path(f)
         if not f.is_file():
-            raise SourceMissingError(f"Datei {f} nicht gefunden")
+            raise SourceMissingError(f"File {f} not found")
         rel = unicodedata.normalize("NFC", f.name)
         n, stem, suffix = 2, Path(rel).stem, Path(rel).suffix
         while rel.casefold() in taken:               # same name from different folders
@@ -360,7 +360,7 @@ def send_files(
         st = f.stat()
         entries.append(SourceEntry(rel, f, False, st.st_size, int(st.st_mtime)))
     if not entries:
-        raise ValueError("keine Dateien zum Senden")
+        raise ValueError("no files to send")
     entries.sort(key=lambda e: e.rel)
     return _send(name, entries, drive_root, opts, progress, cancel, sender, f"{len(entries)} files")
 
@@ -415,11 +415,11 @@ def _send(name: str, entries: list[SourceEntry], drive_root: Path, opts: Optiona
         now = time.monotonic()
         if now - last_report > 0.25:
             last_report = now
-            progress(done, total_bytes, f"Packe … ({human_bytes(done)} / {human_bytes(total_bytes)})")
+            progress(done, total_bytes, f"Packing … ({human_bytes(done)} / {human_bytes(total_bytes)})")
 
     def on_stripe(stripe: int, path: Path, length: int) -> None:
         nonlocal written, skipped
-        progress(done, total_bytes, f"Stripe {stripe + 1}: Parität wird berechnet …")
+        progress(done, total_bytes, f"Stripe {stripe + 1}: computing parity …")
         packets = encode_stripe(path, length, opts.k, opts.m, stripe, tid, out_dir, cancel)
         for p, hdr in packets:
             check_cancel(cancel)
@@ -455,8 +455,8 @@ def _send(name: str, entries: list[SourceEntry], drive_root: Path, opts: Optiona
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
-    msg = (f"Fertig: {sink.stripe} Stripes, {written} Pakete geschrieben"
-           + (f", {skipped} bereits vorhanden" if skipped else ""))
+    msg = (f"Done: {sink.stripe} stripes, {written} packets written"
+           + (f", {skipped} already present" if skipped else ""))
     progress(total_bytes, total_bytes, msg)
     log.info("Send finished: %d stripes, %d packets written, %d skipped", sink.stripe, written, skipped)
     return SendResult(target, tid.hex(), sink.stripe, sink.total, total_bytes,

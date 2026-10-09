@@ -35,7 +35,7 @@ class Delivery:
     target: Optional[str] = None                # send: Drive folder; receive: inbox
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
     state: str = QUEUED
-    message: str = "Wartet …"
+    message: str = "Waiting …"
     action: Optional[str] = None
     details: str = ""
     hint: str = ""                              # second line, only for the current session
@@ -69,7 +69,7 @@ class History:
                 continue
             d.hint = ""
             if d.state in ACTIVE:                # the app was closed while it was working
-                d.state, d.message, d.action = PAUSED, "Unterbrochen.", "resume"
+                d.state, d.message, d.action = PAUSED, "Interrupted.", "resume"
             h.items.append(d)
         return h
 

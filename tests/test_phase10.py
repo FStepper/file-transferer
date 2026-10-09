@@ -144,7 +144,7 @@ def test_first_start_offers_existing_deliveries(env, tmp_path):
     app = start()
     assert run_until(app, lambda: receive_cards(app))
     d = receive_cards(app)[0]
-    assert d.state == OFFERED and app._card(d).button.cget("text") == "Empfangen"
+    assert d.state == OFFERED and app._card(d).button.cget("text") == "Receive"
     assert not (inbox / "Drehtag 3").exists()
     app.run_action(d, "receive_now")
     assert run_until(app, lambda: d.state == DONE)
@@ -161,7 +161,7 @@ def test_own_deliveries_are_only_offered(env, tmp_path):
     app.set_mode("receive")
     assert run_until(app, lambda: receive_cards(app))
     d = receive_cards(app)[0]
-    assert d.state == OFFERED and "diesem Computer" in d.message
+    assert d.state == OFFERED and "this computer" in d.message
 
 
 def test_removed_card_is_not_fetched_again(env, tmp_path):
@@ -196,7 +196,7 @@ def test_lost_parts_are_restored_and_completed_later(env, tmp_path, monkeypatch)
     app = start()
     assert run_until(app, lambda: receive_cards(app) and receive_cards(app)[0].state == INCOMPLETE)
     d = receive_cards(app)[0]
-    assert "1 Datei fehlt noch" in d.message and d.action == "fetch_missing"
+    assert "1 file is still missing" in d.message and d.action == "fetch_missing"
     assert (Path(d.result) / "a.mp4").exists() and not (Path(d.result) / "b.mp4").exists()
 
     for p, raw in saved.items():                                  # the sender sent again
@@ -213,7 +213,7 @@ def test_free_drive_space_after_arrival(env, tmp_path):
     assert run_until(app, lambda: receive_cards(app) and receive_cards(app)[0].state == DONE)
     d = receive_cards(app)[0]
     card = app._card(d)
-    assert card.link.winfo_manager() and "Platz in der Cloud freigeben" in card.link.cget("text")
+    assert card.link.winfo_manager() and "Free up cloud space" in card.link.cget("text")
     app.free_drive(d)
     assert not res.target.exists() and (inbox / "Drehtag 3" / "a.mp4").exists()
     assert d.hint == gui.DELETED_HINT and not app.can_free_drive(d)
@@ -240,6 +240,6 @@ def test_replace_retries_while_destination_is_busy(tmp_path, monkeypatch):
 def test_waiting_card_shows_incoming_percent():
     from vidtransfer.friendly import Eta, running_text
 
-    assert running_text("receive", 0, 0, "Warte auf Stripe 3", Eta(), 35).startswith(
-        "Wird noch hochgeladen (35 %)")
-    assert running_text("receive", 0, 0, "Warte auf Stripe 3", Eta(), None).startswith("Wartet auf die Cloud")
+    assert running_text("receive", 0, 0, "Waiting for stripe 3", Eta(), 35).startswith(
+        "Still uploading (35 %)")
+    assert running_text("receive", 0, 0, "Waiting for stripe 3", Eta(), None).startswith("Waiting for the cloud")

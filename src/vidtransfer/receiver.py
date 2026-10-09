@@ -78,8 +78,8 @@ class TransferError(Exception):
 
 class InsufficientSpaceError(TransferError):
     def __init__(self, needed: int, free: int):
-        super().__init__(f"Nicht genug Speicherplatz auf dem Ziel: benötigt ca. {human_bytes(needed)}, "
-                         f"frei {human_bytes(free)}.")
+        super().__init__(f"Not enough free space at the target: needs about {human_bytes(needed)}, "
+                         f"free {human_bytes(free)}.")
         self.needed = needed
         self.free = free
 
@@ -88,7 +88,7 @@ class StripeUnavailableError(TransferError):
     """Fewer than k valid packets for a stripe (and no more waiting)."""
 
     def __init__(self, stripe: int, valid: int, needed: int, upload_complete: bool):
-        super().__init__(f"Stripe {stripe + 1}: nur {valid} von mindestens {needed} gültigen Paketen vorhanden")
+        super().__init__(f"Stripe {stripe + 1}: only {valid} of at least {needed} valid packets present")
         self.stripe = stripe
         self.upload_complete = upload_complete
 
@@ -260,9 +260,9 @@ class _StripeStream:
                     self.verifier.prefetch(ahead)
 
             def on_update(res: StripeCheck) -> None:
-                msg = f"Stripe {s + 1}: {len(res.valid)}/{self.k} Pakete bereit, {res.open} werden geladen/geprüft …"
+                msg = f"Stripe {s + 1}: {len(res.valid)}/{self.k} packets ready, {res.open} loading/checking …"
                 if res.stalled:
-                    msg += f" ({len(res.stalled)} hängt/hängen – nutze Parität)"
+                    msg += f" ({len(res.stalled)} stalled – using parity)"
                 self._report(msg)
 
             # Parity packets are only requested when needed (saves downloads)
@@ -284,7 +284,7 @@ class _StripeStream:
                 else:
                     missing = [i for i in range(self.k) if i not in valid]
                     log.info("Stripe %d: data packets %s missing/damaged -> reconstructing", s, missing)
-                    self._report(f"Stripe {s + 1}: rekonstruiere {len(missing)} Paket(e) …")
+                    self._report(f"Stripe {s + 1}: reconstructing {len(missing)} packet(s) …")
                     out = self.work / "stripe.bin"
                     decode_stripe({i: self.folder / packet_name(s, i) for i in valid},
                                   stripe_len, self.k, self.m, out, self.cancel)
@@ -302,12 +302,12 @@ class _StripeStream:
                     log.warning("Stripe %d still has only %d/%d valid packets after %.0f s - giving up",
                                 s, len(valid), self.k, GIVE_UP_SECONDS)
                     raise StripeUnavailableError(s, len(valid), self.k, True)
-                hint = ("Upload abgeschlossen, aber Pakete fehlen/sind defekt – die Cloud synchronisiert "
-                        "evtl. noch. Notfalls auf dem Sender denselben Ordner erneut senden (repariert).")
+                hint = ("Upload finished, but packets are missing/damaged – the cloud may still be "
+                        "syncing. If needed, send the same folder again on the sender (repairs it).")
             else:
                 stuck_since = None
-                hint = "Sender lädt noch hoch"
-            self._report(f"Warte auf Stripe {s + 1} ({len(valid)}/{self.k} Pakete) – {hint}")
+                hint = "sender is still uploading"
+            self._report(f"Waiting for stripe {s + 1} ({len(valid)}/{self.k} packets) – {hint}")
             log.info("Waiting for stripe %d (%d/%d valid)", s, len(valid), self.k)
             sleep_cancellable(POLL_SECONDS, self.cancel)
 
@@ -387,7 +387,7 @@ class _StripeStream:
                     break
             chunk = self._fh.read(min(size - len(out), self._remaining))
             if not chunk:
-                raise TransferError("Paket wurde während des Lesens verändert")
+                raise TransferError("Packet changed while it was being read")
             self._remaining -= len(chunk)
             out += chunk
         self.pos += len(out)
@@ -532,7 +532,7 @@ def _write_file(reader: RecordReader, rec: RecordHeader, target: Path, expected:
             out.flush()
             os.fsync(out.fileno())
         if expected and expected != sha:
-            raise ContainerError(f"„{rec.path}“: Prüfsumme passt nicht zum Manifest")
+            raise ContainerError(f"\"{rec.path}\": checksum does not match the manifest")
     except BaseException:
         part.unlink(missing_ok=True)
         raise
@@ -545,8 +545,8 @@ def _misread(exc: Exception) -> TransferError:
     # Every packet passed its SHA-256 check, so the data was most likely read
     # incorrectly (transient I/O or memory error). Finished files are kept.
     log.error("Stream could not be decoded: %s", exc)
-    return TransferError(f"Datenstrom fehlerhaft gelesen ({exc}). Bitte erneut empfangen – "
-                         "fertige Dateien bleiben erhalten.")
+    return TransferError(f"Data stream was misread ({exc}). Please receive again – "
+                         "finished files are kept.")
 
 
 @dataclass
@@ -578,12 +578,12 @@ def _index_entry(stream: _StripeStream, path: str, cancel) -> dict:
     while True:
         entry = next((f for f in stream.manifest["files"] if f["path"] == path), None)
         if entry is None:
-            raise TransferError(f"„{path}“ steht nicht im Manifest")
+            raise TransferError(f"\"{path}\" is not in the manifest")
         if "offset" in entry:
             return entry
         if not stream.wait:
-            raise TransferError(f"„{path}“ ist noch nicht übertragen")
-        stream.progress(stream.consumed, stream.total(), f"Warte, bis „{path}“ übertragen ist …")
+            raise TransferError(f"\"{path}\" has not been transferred yet")
+        stream.progress(stream.consumed, stream.total(), f"Waiting until \"{path}\" is transferred …")
         sleep_cancellable(POLL_SECONDS, cancel)
         stream._refresh_manifest()
 
@@ -614,11 +614,11 @@ def _unpack_targeted(stream: _StripeStream, partial: Path, state: _ReceiveState,
                 continue
             try:
                 if entry["offset"] < reader.pos:      # only after an error inside this stripe
-                    raise ContainerError("Position bereits überschritten")
+                    raise ContainerError("Position already passed")
                 reader.skip_to(entry["offset"])
                 rec = reader.next()
                 if rec.type != T_FILE or rec.path != path:
-                    raise ContainerError(f"Index passt nicht zum Datenstrom bei „{path}“")
+                    raise ContainerError(f"Index does not match the data stream at \"{path}\"")
                 state.done[path] = _write_file(reader, rec, target, entry.get("sha256"))
             except StripeUnavailableError as exc:
                 if not salvage:
@@ -685,8 +685,8 @@ def _unpack_sequential(stream: _StripeStream, partial: Path, state: _ReceiveStat
     start, stats.skipped = _resume_position(stream.manifest, partial, state)
     if start:
         log.info("Resuming at stream position %d (%d finished file(s) skipped)", start, stats.skipped)
-        progress(start, stream.total(), f"Springe zu Position {human_bytes(start)} "
-                                        f"({stats.skipped} Datei(en) bereits fertig) …")
+        progress(start, stream.total(), f"Jumping to position {human_bytes(start)} "
+                                        f"({stats.skipped} file(s) already done) …")
         reader.skip_to(start)
     try:
         while True:
@@ -817,7 +817,7 @@ def _unpack_tar(stream: _StripeStream, partial: Path, state: _ReceiveState,
             else:
                 part.unlink()
                 state.save()
-                raise TransferError(f"Prüfsumme falsch: {rel} – bitte erneut empfangen")
+                raise TransferError(f"Wrong checksum: {rel} – please receive again")
             state.save()
             stats.written += 1
             progress(stream.consumed, stream.total(), f"Entpackt: {rel}")
@@ -842,28 +842,28 @@ def _finalize(partial: Path, state: _ReceiveState, man: dict,
             continue
         target = state.target(partial, rel)
         if target is None:
-            errors.append(f"unzulässiger Pfad: {rel}")
+            errors.append(f"invalid path: {rel}")
             continue
         if rel in state.done:
             if state.done[rel]["sha256"] != f["sha256"]:
                 state.done.pop(rel)
-                errors.append(f"Prüfsumme falsch: {rel}")
+                errors.append(f"wrong checksum: {rel}")
             continue
         entry = state.pending.pop(rel, None)
         part = _part_path(target)
         if entry is None:
-            errors.append(f"fehlt: {rel}")
+            errors.append(f"missing: {rel}")
         elif entry["sha256"] == f["sha256"] and part.exists():
             os.replace(part, target)
             state.done[rel] = entry
         else:
             part.unlink(missing_ok=True)
-            errors.append(f"Prüfsumme falsch: {rel}")
+            errors.append(f"wrong checksum: {rel}")
     state.save()
     if errors:
-        more = f"\n… und {len(errors) - 20} weitere" if len(errors) > 20 else ""
-        raise TransferError("Überprüfung fehlgeschlagen (erneut empfangen schreibt nur die "
-                            "betroffenen Dateien neu):\n" + "\n".join(errors[:20]) + more)
+        more = f"\n… and {len(errors) - 20} more" if len(errors) > 20 else ""
+        raise TransferError("Verification failed (receiving again rewrites only the "
+                            "affected files):\n" + "\n".join(errors[:20]) + more)
 
 
 def _dir_mtimes(partial: Path, man: dict, state: _ReceiveState, stats: _UnpackStats,
@@ -953,12 +953,12 @@ def _wait_for_manifest(folder: Path, wait: bool, progress: ProgressFn, cancel,
         if man and (not complete or man.get("status") == STATUS_COMPLETE):
             return man
         if not wait:
-            raise TransferError("Manifest ist noch nicht abgeschlossen" if man
-                                else f"Kein gültiges Manifest in {folder}")
+            raise TransferError("Manifest is not complete yet" if man
+                                else f"No valid manifest in {folder}")
         if stream:
-            progress(stream.consumed, stream.total(), "Warte auf abschließendes Manifest …")
+            progress(stream.consumed, stream.total(), "Waiting for the final manifest …")
         else:
-            progress(0, 0, "Warte auf Manifest …")
+            progress(0, 0, "Waiting for the manifest …")
         sleep_cancellable(POLL_SECONDS, cancel)
 
 
@@ -990,20 +990,20 @@ def receive_folder(
     if man is None and without_manifest:
         man = synthesize_manifest(folder)
         if man is None:
-            raise TransferError(f"In {folder} wurden keine VidTransfer-Pakete gefunden")
+            raise TransferError(f"No VidTransfer packets found in {folder}")
     elif man is None:
         man = _wait_for_manifest(folder, wait, progress, cancel)
     synthetic = bool(man.get("synthetic"))
     v2 = format_version(man) >= 2
     if (only or salvage) and not v2:
-        raise TransferError("Einzelne Dateien und Teilrettung gibt es erst für Transfers ab Format 2.")
+        raise TransferError("Single files and partial recovery need transfers of format 2 or later.")
     if only and synthetic:
-        raise TransferError("Ohne Manifest gibt es keine Dateiliste – bitte alles wiederherstellen.")
+        raise TransferError("Without a manifest there is no file list – please restore everything.")
     if salvage and man.get("status") != STATUS_COMPLETE:
-        raise TransferError("Teilrettung ist erst möglich, wenn der Upload abgeschlossen ist.")
+        raise TransferError("Partial recovery is only possible once the upload is finished.")
     selected_list = _select(man, only) if only else None
     if only and not selected_list:
-        raise TransferError("Keine Datei passt zu: " + ", ".join(only))
+        raise TransferError("No file matches: " + ", ".join(only))
     selected = set(selected_list) if selected_list is not None else None
 
     dest_parent.mkdir(parents=True, exist_ok=True)
@@ -1017,7 +1017,7 @@ def receive_folder(
     if resumed:
         n = len(state.done) + len(state.pending)
         log.info("Resuming receive into %s (%d file(s) already done)", partial, n)
-        progress(0, 0, f"Setze Empfang fort ({n} Datei(en) bereits fertig) …")
+        progress(0, 0, f"Resuming receive ({n} file(s) already done) …")
     else:
         log.info("Receiving %s -> %s%s", folder, final, " (without manifest)" if synthetic else "")
 
@@ -1030,7 +1030,7 @@ def receive_folder(
         stats = _unpack(stream, partial, state, progress, cancel, selected_list, salvage or synthetic)
         if not synthetic:
             man = _wait_for_manifest(folder, wait, progress, cancel, complete=True, stream=stream)
-            progress(stream.consumed, stream.total(), "Prüfe Dateien …")
+            progress(stream.consumed, stream.total(), "Checking files …")
             _finalize(partial, state, man, selected, set(stats.failed))
     except Cancelled:
         log.info("Receive cancelled; it can be resumed from %s", partial)
@@ -1059,9 +1059,9 @@ def receive_folder(
     done_files = [f for f in man["files"] if f["path"] in state.done] if not synthetic else \
         [{"size": v["size"]} for v in state.done.values()]
     total_bytes = sum(f["size"] for f in done_files)
-    msg = (f"Fertig: {len(done_files)} Dateien ({human_bytes(total_bytes)}) geprüft"
-           + (f", {stream.repaired} Stripe(s) repariert" if stream.repaired else "")
-           + (f", {len(stats.failed)} Datei(en) nicht rettbar" if stats.failed else ""))
+    msg = (f"Done: {len(done_files)} files ({human_bytes(total_bytes)}) verified"
+           + (f", {stream.repaired} stripe(s) repaired" if stream.repaired else "")
+           + (f", {len(stats.failed)} file(s) not recoverable" if stats.failed else ""))
     progress(1, 1, msg)
     log.info("Receive finished: %s, %d files, %d repaired stripe(s), %d skipped (resume), "
              "%d failed, lost stripes %s", dest, len(done_files), stream.repaired, stats.skipped,
@@ -1089,7 +1089,7 @@ def verify_transfer(
     if man is None and without_manifest:
         man = synthesize_manifest(folder)
     if not man:
-        raise TransferError(f"Kein gültiges Manifest in {folder}")
+        raise TransferError(f"No valid manifest in {folder}")
     p = man["params"]
     k, m = p["k"], p["m"]
     complete = man.get("status") == STATUS_COMPLETE
@@ -1107,7 +1107,7 @@ def verify_transfer(
         for s in range(stripes):
             def on_update(r: StripeCheck, s=s) -> None:
                 done = s * (k + m) + len(r.valid) + len(r.bad) + len(r.stalled)
-                progress(done, total, f"Prüfe Stripe {s + 1}/{stripes} ({r.open} Pakete in Arbeit) …")
+                progress(done, total, f"Checking stripe {s + 1}/{stripes} ({r.open} packets in progress) …")
 
             r = verifier.collect(s, need_all=True, on_update=on_update)
             res.bad_packets += [packet_name(s, i) for i in r.bad]
@@ -1140,7 +1140,7 @@ def _hash_records(stream: _StripeStream, res: VerifyResult, got: dict, progress:
         if rec.type == T_FILE:
             got[rec.path] = reader.read_data(rec, lambda _b: None)   # also checks the trailer
             res.bytes_checked += rec.size
-            progress(stream.consumed, stream.total(), f"Prüfe Inhalt: {rec.path}")
+            progress(stream.consumed, stream.total(), f"Checking content: {rec.path}")
 
 
 def _hash_tar(stream: _StripeStream, man: dict, res: VerifyResult, got: dict,
@@ -1161,7 +1161,7 @@ def _hash_tar(stream: _StripeStream, man: dict, res: VerifyResult, got: dict,
                 h.update(chunk)
             got[member.name] = h.hexdigest()
             res.bytes_checked += member.size
-            progress(stream.consumed, stream.total(), f"Prüfe Inhalt: {member.name}")
+            progress(stream.consumed, stream.total(), f"Checking content: {member.name}")
     finally:
         tar.close()
         if source is not None:
@@ -1180,15 +1180,15 @@ def _verify_content(folder: Path, man: dict, res: VerifyResult, verifier: Packet
         else:
             _hash_tar(stream, man, res, got, progress, cancel)
     except (TransferError, ContainerError, tarfile.TarError, zstandard.ZstdError) as exc:
-        res.content_errors.append(f"Datenstrom nicht lesbar: {exc}")
+        res.content_errors.append(f"Data stream not readable: {exc}")
     finally:
         stream.close()
         shutil.rmtree(work, ignore_errors=True)
 
     for f in man["files"]:
         if f["path"] not in got:
-            res.content_errors.append(f"fehlt: {f['path']}")
+            res.content_errors.append(f"missing: {f['path']}")
         elif got[f["path"]] != f["sha256"]:
-            res.content_errors.append(f"Prüfsumme falsch: {f['path']}")
+            res.content_errors.append(f"wrong checksum: {f['path']}")
     res.files_checked = len(got)
     res.content_verified = not res.content_errors

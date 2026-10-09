@@ -48,18 +48,17 @@ if sys.platform == "darwin":
         "NSRequiresAquaSystemAppearance": False,
         # Folders may be dropped onto the app / Dock icon.
         # LSHandlerRank "None": accepts drops but never becomes the default app for folders.
-        # The usage descriptions below are shown to the user, hence German.
         "CFBundleDocumentTypes": [{
-            "CFBundleTypeName": "Ordner",
+            "CFBundleTypeName": "Folder",
             "CFBundleTypeRole": "Viewer",
             "LSHandlerRank": "None",
             "LSItemContentTypes": ["public.folder", "public.directory"],
         }],
-        "NSDesktopFolderUsageDescription": "VidTransfer liest Ordner, die gesendet werden sollen, und speichert empfangene Ordner.",
-        "NSDocumentsFolderUsageDescription": "VidTransfer liest Ordner, die gesendet werden sollen, und speichert empfangene Ordner.",
-        "NSDownloadsFolderUsageDescription": "VidTransfer speichert empfangene Ordner.",
-        "NSRemovableVolumesUsageDescription": "VidTransfer liest Video-Ordner von externen Laufwerken.",
-        "NSNetworkVolumesUsageDescription": "VidTransfer liest Video-Ordner von Netzlaufwerken.",
-        "NSFileProviderDomainUsageDescription": "VidTransfer legt die Pakete im Cloud-Ordner ab und liest sie dort.",
+        "NSDesktopFolderUsageDescription": "VidTransfer reads folders to send and saves received folders.",
+        "NSDocumentsFolderUsageDescription": "VidTransfer reads folders to send and saves received folders.",
+        "NSDownloadsFolderUsageDescription": "VidTransfer saves received folders.",
+        "NSRemovableVolumesUsageDescription": "VidTransfer reads video folders from external drives.",
+        "NSNetworkVolumesUsageDescription": "VidTransfer reads video folders from network drives.",
+        "NSFileProviderDomainUsageDescription": "VidTransfer stores the packets in the cloud folder and reads them there.",
     },
 )

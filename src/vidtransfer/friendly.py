@@ -1,4 +1,4 @@
-"""Plain-language texts for the window (UI language: German).
+"""Plain-language texts for the window.
 
 Everything a non-technical user reads in the main window comes from here:
 status lines, remaining time and the error catalogue. Technical details are
@@ -19,18 +19,18 @@ from vidtransfer.util import Cancelled, human_bytes
 
 # Actions a card can offer (key -> button text)
 ACTIONS = {
-    "stop": "Stopp",
-    "resume": "Fortsetzen",
-    "retry": "Erneut versuchen",
-    "resend": "Erneut senden",
-    "reveal": "Im Explorer zeigen" if sys.platform == "win32" else "Im Finder zeigen",
-    "open_drive": "Cloud-App starten",
-    "choose_inbox": "Anderen Speicherort wählen",
-    "open_privacy": "Zugriff erlauben …",
-    "salvage": "Alles andere jetzt holen",
-    "fetch_missing": "Fehlende Dateien holen",
-    "choose_drive": "Cloud-Ordner wählen …",
-    "receive_now": "Empfangen",
+    "stop": "Stop",
+    "resume": "Resume",
+    "retry": "Try again",
+    "resend": "Send again",
+    "reveal": "Show in Explorer" if sys.platform == "win32" else "Show in Finder",
+    "open_drive": "Start cloud app",
+    "choose_inbox": "Choose another location",
+    "open_privacy": "Allow access …",
+    "salvage": "Get everything else now",
+    "fetch_missing": "Get missing files",
+    "choose_drive": "Choose cloud folder …",
+    "receive_now": "Receive",
 }
 
 
@@ -42,7 +42,7 @@ class Explanation:
 
 
 def when(iso: Optional[str]) -> str:
-    """"heute 14:02", "gestern 18:40" or "03.10. 09:15"."""
+    """"today 14:02", "yesterday 18:40" or "2026-10-03 09:15"."""
     if not iso:
         return ""
     try:
@@ -51,20 +51,20 @@ def when(iso: Optional[str]) -> str:
         return ""
     today = datetime.now().astimezone().date()
     if dt.date() == today:
-        return f"heute {dt:%H:%M}"
+        return f"today {dt:%H:%M}"
     if (today - dt.date()).days == 1:
-        return f"gestern {dt:%H:%M}"
-    return f"{dt:%d.%m.} {dt:%H:%M}"
+        return f"yesterday {dt:%H:%M}"
+    return f"{dt:%Y-%m-%d %H:%M}"
 
 
 def remaining(seconds: float) -> str:
     if seconds < 60:
-        return "noch weniger als 1 Min."
+        return "less than 1 min left"
     minutes = int(round(seconds / 60))
     if minutes < 60:
-        return f"noch ca. {minutes} Min."
+        return f"about {minutes} min left"
     hours, minutes = divmod(minutes, 60)
-    return f"noch ca. {hours} Std. {minutes} Min." if minutes else f"noch ca. {hours} Std."
+    return f"about {hours} h {minutes} min left" if minutes else f"about {hours} h left"
 
 
 class Eta:
@@ -94,11 +94,11 @@ def running_text(kind: str, done: int, total: int, msg: str, eta: Eta,
     `incoming`: how much of the delivery has arrived in the Drive folder (percent),
     shown while receiving waits for the rest.
     """
-    if kind == "receive" and msg.startswith("Warte"):
+    if kind == "receive" and msg.startswith("Waiting"):
         if incoming is not None and incoming < 100:
-            return f"Wird noch hochgeladen ({incoming} %) – wird empfangen, sobald es da ist …"
-        return "Wartet auf die Cloud – die Lieferung ist noch nicht vollständig da …"
-    verb = "Wird vorbereitet" if kind == "send" else "Wird empfangen"
+            return f"Still uploading ({incoming} %) – receiving as it arrives …"
+        return "Waiting for the cloud – the delivery is not complete yet …"
+    verb = "Preparing" if kind == "send" else "Receiving"
     if total <= 0:
         return f"{verb} …"
     pct = min(100, int(100 * done / total))
@@ -109,11 +109,11 @@ def running_text(kind: str, done: int, total: int, msg: str, eta: Eta,
 def size_line(size: int, files: int, sender: Optional[str] = None) -> str:
     parts = []
     if sender:
-        parts.append(f"von {sender}")
+        parts.append(f"from {sender}")
     if size:
         parts.append(human_bytes(size))
     if files:
-        parts.append(f"{files} Datei" + ("" if files == 1 else "en"))
+        parts.append(f"{files} file" + ("" if files == 1 else "s"))
     return " · ".join(parts)
 
 
@@ -129,29 +129,29 @@ def explain(exc: BaseException, kind: str) -> Explanation:
         return Explanation(message, action, details)
 
     if isinstance(exc, Cancelled):
-        return e("Pausiert.", "resume")
+        return e("Paused.", "resume")
     if isinstance(exc, DriveFolderMissingError):
-        return e("Der Cloud-Ordner ist nicht erreichbar. Läuft die Cloud-App?", "open_drive")
+        return e("The cloud folder cannot be reached. Is the cloud app running?", "open_drive")
     if isinstance(exc, SourceMissingError):
-        return e("Der Ordner bzw. die Datei ist nicht mehr da – wurde etwas verschoben "
-                 "oder ein Laufwerk getrennt?", "retry")
+        return e("The folder or file is gone – was something moved "
+                 "or a drive disconnected?", "retry")
     if isinstance(exc, SourceChangedError):
-        return e("Eine Datei hat sich während des Sendens verändert.", "resend")
+        return e("A file changed while it was being sent.", "resend")
     if isinstance(exc, InsufficientSpaceError):
         missing = max(0, exc.needed - exc.free)
-        return e(f"Auf diesem Computer fehlen {human_bytes(missing)} Speicherplatz.", "choose_inbox")
+        return e(f"This computer needs {human_bytes(missing)} more free space.", "choose_inbox")
     if isinstance(exc, StripeUnavailableError):
         if exc.upload_complete:
-            return e("Ein Teil der Lieferung fehlt in der Cloud.", "salvage")
-        return e("Die Lieferung ist noch nicht vollständig in der Cloud.", "retry")
+            return e("Part of the delivery is missing in the cloud.", "salvage")
+        return e("The delivery is not complete in the cloud yet.", "retry")
     if isinstance(exc, PermissionError):
-        return e("VidTransfer darf auf einen Ordner nicht zugreifen.", "open_privacy")
+        return e("VidTransfer is not allowed to access a folder.", "open_privacy")
     if isinstance(exc, OSError) and exc.errno == errno.ENOSPC:
-        return e("Der Speicherplatz ist voll – auf diesem Computer oder in der Cloud.", "retry")
+        return e("The disk is full – on this computer or in the cloud.", "retry")
     if isinstance(exc, TransferError):
-        if "Manifest" in str(exc):
-            return e("Diese Lieferung ist noch nicht vollständig in der Cloud angekommen.", "retry")
-        return e("Beim Empfangen ist ein Lesefehler aufgetreten. Erneut versuchen setzt "
-                 "dort fort, wo es aufgehört hat.", "retry")
-    verb = "Senden" if kind == "send" else "Empfangen"
-    return e(f"Beim {verb} ist etwas schiefgelaufen.", "resend" if kind == "send" else "retry")
+        if "manifest" in str(exc).lower():
+            return e("This delivery has not fully arrived in the cloud yet.", "retry")
+        return e("A read error occurred while receiving. Try again continues "
+                 "where it stopped.", "retry")
+    verb = "sending" if kind == "send" else "receiving"
+    return e(f"Something went wrong while {verb}.", "resend" if kind == "send" else "retry")

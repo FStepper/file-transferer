@@ -7,6 +7,10 @@ platform is **macOS** (Apple Silicon M2, possibly Intel); development happens on
 Windows. The app ships as a self-contained `.app` bundle, so no Python
 installation is needed.
 
+> Note: the UI was originally German, so the mockups and quoted texts below are
+> German. Since then the whole app is English (no translations), and the UI
+> calls the sync folder "cloud folder" (default: Google Drive).
+
 ## Usage
 
 - **Send:** drag a folder onto the app icon (Finder/Dock). The app creates a

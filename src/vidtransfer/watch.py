@@ -98,18 +98,18 @@ class NotADeliveryError(Exception):
 
 
 def delete_delivery(folder: Path, transfer_id: str) -> None:
-    """Delete a delivery folder from Google Drive – only if it contains nothing but
+    """Delete a delivery folder from the cloud folder – only if it contains nothing but
     VidTransfer's own files of exactly this delivery (so nothing else can be lost)."""
     folder = Path(folder)
     man = read_manifest(folder)
     if not man or man["transfer_id"] != transfer_id:
-        raise NotADeliveryError(f"{folder} ist nicht diese Lieferung")
+        raise NotADeliveryError(f"{folder} is not this delivery")
     own = set(MANIFEST_NAMES) | {README_NAME}
     for entry in os.scandir(folder):
         name = entry.name
         ours = (name in own or parse_packet_name(name) is not None
                 or (name.startswith(".") and name.endswith(".tmp")))
         if not ours or entry.is_dir():
-            raise NotADeliveryError(f"{folder} enthält fremde Dateien ({name}) – wird nicht gelöscht")
+            raise NotADeliveryError(f"{folder} contains other files ({name}) – not deleted")
     shutil.rmtree(folder)
     log.info("Deleted delivery folder %s", folder)
