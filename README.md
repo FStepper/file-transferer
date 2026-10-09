@@ -44,6 +44,19 @@ How unpacking stays safe:
 - At the end, `VidTransfer-Report.txt` in the restored folder lists every file with
   its size and SHA-256.
 
+**If parts are lost for good**
+
+If some packets are missing for good (the upload is complete, but Google Drive
+does not have them), the app asks whether everything else should be restored.
+The result is a folder `Shoot Day 3 (incomplete)`; the report lists the missing
+files. To complete it later, send the same folder again on the sending side
+(only the missing packets are written), then receive into the same destination
+again. The folder is then completed and renamed to `Shoot Day 3`.
+
+If the content list (manifest) of a delivery is unreadable, the app offers an
+emergency recovery from the packets alone. Every restored file is still
+verified, but the app cannot tell whether files are missing.
+
 **Verify only**
 
 **„Nur prüfen …“** (or `vidtransfer verify`) downloads and checks all packets and
@@ -132,8 +145,19 @@ VT=/Applications/VidTransfer.app/Contents/MacOS/VidTransfer
 $VT send    ~/Videos/ShootDay3
 $VT status  "$HOME/Library/CloudStorage/GoogleDrive-…/My Drive/ShootDay3"   # quick, downloads nothing
 $VT verify  "<Drive folder>"                # check all packets + content, no unpacking
+$VT list    "<Drive folder>"                # files, sizes, availability (downloads nothing)
 $VT receive "<Drive folder>" ~/Downloads    # resumes automatically if interrupted
+$VT receive "<Drive folder>" ~/Downloads --only "Audio/*.wav" --only "clip01.mp4"
+$VT receive "<Drive folder>" ~/Downloads --salvage            # restore everything that is left
+$VT receive "<Drive folder>" ~/Downloads --without-manifest   # emergency: packets only
 ```
+
+`--only` matches the path or the file name (wildcards allowed, not
+case-sensitive) or a folder (`"Audio/"`), and loads only the parts of the
+delivery these files are in.
+
+File names are adapted where the destination requires it (e.g. `:` on Windows,
+two names that differ only in case); every renamed file is listed in the report.
 
 Exit codes: `0` success, `1` error, `2` transfer incomplete or not recoverable
 (`status`/`verify`), `130` cancelled.

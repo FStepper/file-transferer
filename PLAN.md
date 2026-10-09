@@ -15,7 +15,9 @@ installation is needed.
   destination. The app verifies and repairs the packets, unpacks them and checks
   every file with SHA-256 (details: [Unpacking](#unpacking)).
 - Alternatively there are buttons in the window and a CLI
-  (`vidtransfer send|receive|verify|status`, later `list`).
+  (`vidtransfer send|receive|verify|status|list`).
+- The UI is currently aimed at technical users; the plan for a much simpler UI
+  is in [Simplified UI and usability](#simplified-ui-and-usability).
 
 ## Pipeline
 
@@ -91,9 +93,9 @@ What this enables:
 | Unpack while the upload is running (streaming) | ✔ | ✔ (records are self-describing) |
 | Verify a file before the final manifest exists | ✖ (stays `.vtpart`) | ✔ (trailer hash) |
 | Resume after interruption | ✔ (finished files skipped, but the stream is re-read from the start) | ✔ (jumps straight to the first unfinished file; earlier stripes are never loaded) |
-| Restore single files (phase 8) | ✖ | possible (only the required stripes are loaded) |
-| Partial recovery if a stripe is lost for good (phase 8) | ✖ (rest is lost) | possible (only affected files are missing) |
-| Unpack without manifest (emergency, phase 8) | limited | possible (resync via magic + CRC) |
+| Restore single files | ✖ | ✔ (only the required stripes are loaded) |
+| Partial recovery if a stripe is lost for good | ✖ (rest is lost) | ✔ (only affected files are missing) |
+| Unpack without manifest (emergency) | sequential only, no recovery after damage | ✔ (resync via magic + CRC) |
 
 v1 transfers remain readable. The receiver detects the format via
 `manifest.format_version`. A v1 writer is kept (`SendOptions(format_version=1)`)
@@ -103,8 +105,13 @@ so that every end-to-end test runs for both formats.
 
 ### Flow
 
-1. **Detect:** a folder containing `manifest*.json` is a transfer folder. A valid
-   copy is chosen; a completed one takes precedence.
+1. **Detect:** a folder containing `manifest*.json` (or at least `*.vtp`
+   packets, see emergency mode) is a transfer folder. A valid copy is chosen; a
+   completed one takes precedence.
+   - With a complete v2 index, files are processed *targeted*: the receiver
+     jumps from file to file via the index (basis for `--only`, resume and
+     partial recovery). While the sender is still indexing, records are read
+     sequentially.
 2. **Pre-checks before anything is written:** ✔
    - **Free space** at the destination ≥ sum of original sizes + 1 stripe + 5 %
      reserve. Otherwise a clear message with the exact numbers is shown.
@@ -175,20 +182,36 @@ so that every end-to-end test runs for both formats.
 - Tested with a hard-killed process: the resume skips the finished file and the
   result is byte-identical.
 
-### Partial recovery ("emergency")
+### Partial recovery ✔
 
 If a stripe is unrecoverable for good (upload complete, fewer than k valid
-packets, sender no longer available), **„Alles Rettbare wiederherstellen“** is
-offered after asking:
-- All files whose stripes are intact are unpacked and verified as usual.
-- The affected files are listed in the report, with the hint that the sender can
-  re-send exactly these stripes. Sending is deterministic and only rewrites
-  missing packets.
-- **Optional for MP4:** the damaged file is written with zeros in the gaps as
-  `name.DAMAGED.mp4`, since players can often still play the rest. This is off by
-  default.
-- **Without manifest** (all three copies lost): records are located via magic and
-  CRC. Without the index, completeness cannot be checked, and this is shown clearly.
+packets even after re-reading):
+- In wait mode the receiver keeps waiting while the upload is running. Once the
+  upload is complete and a stripe stays short for 10 minutes without change, it
+  stops with `StripeUnavailableError`, and the GUI asks whether everything else
+  should be restored (CLI: `receive --salvage`).
+- All files whose stripes are intact are unpacked and verified as usual. Files
+  that touch a lost stripe are skipped; their stripes are not loaded again.
+- The result goes to `<name> (incomplete)`. The report lists the missing files
+  and the lost stripes, with the hint that the sender can simply send the same
+  folder again (sending is deterministic and only rewrites missing packets).
+- The `(incomplete)` folder keeps its state file. Receiving again into the same
+  destination completes it and renames it to `<name>`.
+- Not implemented (optional idea): writing damaged MP4s with zero-filled gaps as
+  `name.DAMAGED.mp4`.
+
+### Emergency without manifest ✔
+
+If all three manifest copies are unreadable (`receive --without-manifest`; the
+GUI offers it when a folder contains packets but no readable manifest):
+- A stand-in manifest is built from the packet headers (transfer ID, k, m,
+  stripe count and length, block size; format detected from the first bytes).
+- Records are read sequentially; every v2 file is still verified via its trailer.
+- After a lost stripe or a damaged record, the reader re-synchronises on the
+  next valid record header (magic + CRC) and continues.
+- Without the file list, completeness cannot be checked; the report and the
+  summary say so clearly. v1 transfers can be read this way, but without
+  recovery after damage.
 
 ### Further features
 
@@ -196,23 +219,31 @@ offered after asking:
   packets of every stripe, then decodes the whole stream and checks every file
   hash, without writing anything. It reports intact, repairable-only-with-parity
   and unrecoverable stripes. This is useful before the sender deletes its data.
-  `--quick` checks packets only.
-- `vidtransfer list <folder>`: shows the file list and sizes from the index.
-- `vidtransfer receive <folder> <dest> --only "Audio/*.wav"`: restores single files
-  (loads only the required stripes).
+  `--quick` checks packets only, `--without-manifest` works in emergency mode.
+- `vidtransfer list <folder>`: ✔ file list with size, compression and a quick
+  availability check per file (headers only, downloads nothing).
+- `vidtransfer receive <folder> <dest> --only "Audio/*.wav"`: ✔ restores single
+  files (glob on the path or the file name, or a folder prefix, case-insensitive;
+  repeatable). Only the stripes of these files are loaded; unrelated folders are
+  not created. Requires format v2.
 
-### Safety and platform details
+### Safety and platform details ✔
 
-- **Paths:** ✔ no absolute paths, no `..`, no drive letters, no symlinks/devices,
-  no collisions with internal files. Everything stays below the destination.
-- **Unicode:** paths are normalised to NFC (macOS delivers NFD), so names and
-  hashes match across platforms.
-- **Windows as destination** (if needed): invalid characters (`:*?"<>|`) and
-  reserved names (`CON`, `NUL`, …) are replaced and noted in the report. Long
-  paths get the `\\?\` prefix.
-- **Case:** APFS and NTFS are case-insensitive by default. If two paths collide,
-  one is renamed and a warning is shown.
-- **Sleep:** ✔ `caffeinate` runs as long as the app is open, including while unpacking.
+- **Paths:** no absolute paths, no `..`, no symlinks/devices, no collisions with
+  internal files. Everything stays below the destination.
+- **Unicode:** paths are normalised to NFC on both sides (macOS delivers NFD),
+  so names and hashes match across platforms.
+- **Windows as destination:** invalid characters (`<>:"|?*\`), trailing dots/
+  spaces and reserved names (`CON`, `NUL`, …) are replaced. Long paths get the
+  `\\?\` prefix. A name like `C:` can therefore never become a drive path.
+- **Case:** APFS and NTFS are case-insensitive by default. If two paths differ
+  only in case, the second one gets a ` (2)` suffix; distinct source folders
+  stay distinct.
+- The name mapping is stored in the receive state (stable when resuming) and
+  every renamed path is listed in the report.
+- Fixed along the way: a top-level name containing `:` (valid on macOS) used to
+  be skipped as unsafe.
+- **Sleep:** `caffeinate` runs as long as the app is open, including while unpacking.
 
 ## Robustness (sending)
 
@@ -248,8 +279,189 @@ offered after asking:
   manifest index grows while sending; resume never touches stripes before the
   first unfinished file; growing source file detected; damaged record header or
   file data detected (CRC / trailer)
-- m+1 losses → partial recovery: all unaffected files correct, report correct (phase 8)
-- All manifests deleted → emergency scan finds all records (phase 8)
+- ✔ `--only`: only matching files restored, only their stripes loaded, no
+  unrelated folders; by name, glob and folder; no match → clear error; v1 → clear error
+- ✔ Lost stripe → error names the stripe; salvage restores all unaffected files
+  into `(incomplete)`, report lists the missing file; after the packets are back,
+  receiving again completes the folder and renames it
+- ✔ Wait mode gives up after the timeout once the upload is complete
+- ✔ `list` marks files in lost stripes as unavailable
+- ✔ All manifests deleted → stand-in manifest matches the real one; everything is
+  restored; with an additional lost stripe, files after the damage are found via resync
+- ✔ Names: Windows rules, reserved names, case collisions, stable mapping on
+  resume, NFC on both sides, `:` in a top-level name, paths longer than 260 characters
+
+## Simplified UI and usability
+
+The engine is robust, but the current window is built for technical users. A
+non-technical user should be able to send and receive without knowing what a
+stripe, a packet or a manifest is, and without ever wondering "is it done?".
+
+### What is too complex today
+
+- **Jargon everywhere:** "Stripe 3: 8/10 Pakete bereit", "Parität", "Manifest",
+  "Transfer-Ordner", "Senden nach: C:\…". The log is a technical log.
+- **Too many choices on one screen:** three buttons ("Ordner senden",
+  "Aus Drive empfangen", "Nur prüfen"), target path, log, cancel, reveal, open log.
+- **Receiving means searching:** the user has to find the right transfer folder
+  inside Google Drive in a folder dialog, then pick a destination.
+- **"Is it done?" has no answer:** after packing, the app says "Google Drive
+  lädt jetzt hoch" but cannot tell when the upload has finished or whether the
+  recipient got everything. This is the biggest practical gap.
+- **Errors are text dumps** without a clear next step.
+- **Drop only onto the app icon**, not onto the window; single files are refused.
+- **First start:** Gatekeeper warnings, no check whether Google Drive is set up.
+
+### Principles
+
+1. **Two verbs:** *senden* and *empfangen*. Everything else happens automatically
+   or is hidden under "Details" / "Einstellungen".
+2. **Plain language** with a fixed glossary (below); numbers in %, GB and minutes.
+3. **The app says what happens next and when it is done**, on both sides.
+4. **One action per problem:** every error message names the cause in one
+   sentence and offers one button that fixes it.
+5. **Safe defaults, no configuration:** nothing is deleted without asking;
+   existing files are never overwritten; resuming is automatic.
+
+### Glossary (UI wording)
+
+| Technical term | Shown to the user as |
+|---|---|
+| transfer / transfer folder | **Lieferung** |
+| packing, stripes, parity | **Wird vorbereitet** (one progress bar) |
+| packets in Drive being uploaded | **Wird hochgeladen** |
+| receiving, verifying, reconstructing | **Wird empfangen** (repairs only as a note: "beschädigte Teile wurden automatisch repariert") |
+| manifest, index, state file | not shown at all |
+| "(incomplete)", lost stripes | **Unvollständig – x Dateien fehlen noch** + action |
+| verify | not a separate action; happens automatically (see U10) |
+| Drive target folder | shown only in the settings |
+
+### Target concept
+
+```
+┌───────────────────────────────────────────────────────────┐
+│  VidTransfer                                          ⚙   │
+│                                                           │
+│   ┌────────────────────────┐   ┌────────────────────────┐ │
+│   │          ⬆             │   │          ⬇             │ │
+│   │    Videos senden       │   │   Videos empfangen     │ │
+│   │  Ordner hierher ziehen │   │  2 neue Lieferungen    │ │
+│   └────────────────────────┘   └────────────────────────┘ │
+│                                                           │
+│  Lieferungen                                              │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │ Drehtag 3 · 48 Dateien · 212 GB                       │ │
+│  │ ████████████░░░░░░░  Wird hochgeladen – noch ~2 Std.  │ │
+│  │ Mac bleibt wach, bis alles hochgeladen ist.           │ │
+│  ├──────────────────────────────────────────────────────┤ │
+│  │ Drehtag 2 · 31 Dateien · 140 GB                       │ │
+│  │ ✔ Beim Empfänger angekommen (gestern 18:40)           │ │
+│  │                    [Platz in Google Drive freigeben]  │ │
+│  └──────────────────────────────────────────────────────┘ │
+└───────────────────────────────────────────────────────────┘
+```
+
+Each delivery is a card with exactly one status line and at most one or two
+buttons. The status steps are the same on both sides:
+*Wird vorbereitet → Wird hochgeladen → Bereit zum Empfangen → Wird empfangen →
+Angekommen ✔*, plus the exceptional states *Pausiert*, *Wartet auf Google Drive*
+and *Unvollständig – Aktion nötig*.
+
+### Measures
+
+**Main window and wording (phase 9)**
+- **U1 Plain language:** replace every user-facing text according to the
+  glossary; progress as %, GB and remaining time; repairs only as a reassuring note.
+- **U2 New main window:** two large action tiles (also drop zones) and the list
+  of deliveries as cards (running and recent, persisted across restarts).
+- **U3 Hide technical details:** the log moves behind "Details anzeigen" on a
+  card; k/m/packet size/Drive folder/compression move to "Einstellungen →
+  Erweitert". "Nur prüfen" disappears from the main window (U10 replaces it).
+- **U4 Error catalogue:** a fixed list of plain-language messages, each with one
+  action. Examples:
+  - "Google Drive läuft nicht." → [Google Drive öffnen]
+  - "Auf diesem Mac fehlen 35 GB Speicherplatz." → [Anderen Speicherort wählen]
+  - "Ein Teil der Lieferung fehlt endgültig." → [Alles andere jetzt holen] [Beim Absender neu anfordern]
+  - "Eine Datei hat sich während des Sendens verändert." → [Erneut senden]
+
+  Technical details go into a "Details kopieren" text for support; no stack traces.
+- **U9 Drop anywhere, files too:** drag & drop onto the window (macOS: Tk with
+  `tkdnd`/`tkinterdnd2`, or natively if the UI moves to a web view, see U18).
+  Single files and several items are accepted: every dropped folder becomes one
+  delivery; loose files become one delivery named "Dateien <Datum>".
+
+**Receiving without searching (phase 10)**
+- **U5 Delivery browser:** "Videos empfangen" lists the deliveries found in the
+  Drive folder (name, size, date, status such as "wird noch hochgeladen – 40 %" or
+  "bereit"). One click on [Empfangen] – no folder dialog inside Google Drive.
+- **U6 Automatic receiving (optional, recommended for the receiving Mac):** the
+  app watches the Drive folder and receives new deliveries automatically into a
+  fixed inbox (default `~/Movies/VidTransfer`), including resuming after restarts.
+  A notification says when a delivery has arrived.
+- **U7 First-run assistant** (3 steps): (1) check Google Drive: installed, signed
+  in, folder found and writable – otherwise show how to fix it; (2) "Wofür nutzen
+  Sie diesen Mac?" Senden / Empfangen / Beides; (3) inbox folder for receiving.
+  Optionally a test delivery with a small file.
+- **U8 Pre-flight checks before sending**, each with a plain warning: Google
+  Drive not running or folder missing; not enough free space in Google Drive
+  (size × 1.3, if the quota can be read) or locally (one stripe); Mac on battery
+  ("Bitte Netzteil anschließen"); source on an external drive ("Laufwerk nicht
+  trennen, bis 'Hochgeladen' angezeigt wird"); folder already inside Google Drive.
+
+**"Is it done?" – back channel through Drive (phase 11)**
+- **U10 Receipt and receiver status:** the receiver writes small status files
+  into the delivery folder (`status/receiver.json` with progress, `status/received.json`
+  when everything is verified). The sender's app shows "Wird empfangen – 60 %"
+  and finally "Beim Empfänger angekommen ✔". This replaces "Nur prüfen" for the
+  normal case. Each side writes only its own files, so Drive never has to merge
+  conflicting versions.
+- **U11 Self-healing:** if the receiver finds parts lost for good, it writes
+  `status/request.json` (missing stripes). If the sender's app is open and the
+  source folder is still there, it re-sends exactly these packets automatically
+  (sending is deterministic). The receiver completes the delivery on its own. The
+  user only sees "Fehlende Teile werden nachgeliefert".
+- **U12 Guided clean-up:** after the receipt, both sides offer [Platz in Google
+  Drive freigeben (212 GB)], with the hint that Google Drive only frees the space
+  after its trash has been emptied. Never automatic.
+
+**Upload status and time (phase 12)**
+- **U13 Upload status from Google Drive:** spike on whether Google Drive's macOS
+  File Provider reports the upload state of each file (`NSURLUbiquitousItemIsUploadedKey`,
+  `…IsUploadingKey`, `…UploadingErrorKey` via PyObjC). If yes: real upload
+  progress per delivery, "Hochgeladen ✔", and `caffeinate` only until the upload
+  is finished (instead of "as long as the app is open"). If not: U10 receipts
+  remain the source of truth, and the hint stays "App offen lassen".
+- **U14 Time estimates:** remaining time for preparing (measured throughput) and
+  uploading (from U13 or U10); clear statements like "Sie können den Mac jetzt
+  zuklappen" only when it is really safe.
+
+**Installation and everyday use (phase 13)**
+- **U15 Signed and notarized app** as a DMG ("in Programme ziehen"): no
+  Gatekeeper warnings and no `xattr` instructions. Requires an Apple Developer
+  account (99 €/year).
+- **U16 Menu bar mode and launch at login** for the receiving Mac: a small icon
+  shows the status; together with U6, receiving works without opening the app.
+
+**Cross-cutting**
+- **U17 Notifications** only for events that matter: ready to receive, arrived,
+  action needed.
+- **U18 Look and accessibility:** larger fonts, clear contrast, dark mode,
+  keyboard operation. Decision needed: keep Tk (`ttk` aqua, limited look,
+  drag & drop needs `tkdnd`) or move the UI to a small HTML interface in a
+  native window (`pywebview`/WKWebView: modern look, native drag & drop with full
+  paths, easier to design; one more dependency). Recommendation: a short spike
+  with `pywebview` before phase 9, because U2/U9 depend on it.
+- **U19 Usability tests:** 2–3 non-technical people, tasks "Schicke den Ordner
+  Drehtag 3" and "Hol die neue Lieferung ab", without help. Measure time,
+  questions and mistakes; repeat after phases 9 and 10.
+
+### Open questions
+
+- Who uses which Mac – one fixed sender and one fixed receiver, or both
+  directions? (decides on U6/U16 as defaults)
+- Is an Apple Developer account available for signing (U15)?
+- Tk or HTML UI (U18)?
+- Should automatic receiving (U6) be on by default on a receiving Mac?
 
 ## Implementation
 
@@ -263,5 +475,16 @@ offered after asking:
    timeout, result cache, re-read on failure
 7. ✔ **Container v2:** record format, per-file compression, index in the manifest
    (incremental), jump on resume, v1 stays readable
-8. **Unpacking, part 3:** `--only`, `list`, partial recovery, emergency scan
+8. ✔ **Unpacking, part 3:** `--only`, `list`, partial recovery, emergency mode
    without manifest, NFC/Windows name handling
+9. **UI, part 1 – plain and simple:** plain-language texts and error catalogue,
+   new main window (two actions + delivery cards), technical details hidden,
+   drop onto the window, single files (see U1–U4, U9)
+10. **UI, part 2 – receiving without searching:** delivery browser, automatic
+    receiving, first-run assistant, pre-flight checks (U5–U8)
+11. **Back channel:** receiver status and receipt in the transfer folder, "arrived"
+    on the sender, automatic re-send of missing parts, guided clean-up (U10–U12)
+12. **Upload status:** spike on the macOS File Provider upload state; keep awake
+    until uploaded; real time estimates (U13–U14)
+13. **Delivery:** signed and notarized DMG, optional menu bar mode and launch at
+    login (U15–U16)
