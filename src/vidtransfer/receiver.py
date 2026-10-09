@@ -77,7 +77,11 @@ class TransferError(Exception):
 
 
 class InsufficientSpaceError(TransferError):
-    pass
+    def __init__(self, needed: int, free: int):
+        super().__init__(f"Nicht genug Speicherplatz auf dem Ziel: benötigt ca. {human_bytes(needed)}, "
+                         f"frei {human_bytes(free)}.")
+        self.needed = needed
+        self.free = free
 
 
 class StripeUnavailableError(TransferError):
@@ -104,6 +108,7 @@ class ReceiveResult:
     renamed: dict[str, str] = field(default_factory=dict)
     selected: bool = False                              # only some files were requested
     without_manifest: bool = False
+    sender: Optional[str] = None                        # name of the sending computer
 
 
 @dataclass
@@ -1007,9 +1012,7 @@ def receive_folder(
     if free < need:
         if not resumed:
             shutil.rmtree(partial, ignore_errors=True)
-        raise InsufficientSpaceError(
-            f"Nicht genug Speicherplatz auf dem Ziel: benötigt ca. {human_bytes(need)}, "
-            f"frei {human_bytes(free)}.")
+        raise InsufficientSpaceError(need, free)
 
     if resumed:
         n = len(state.done) + len(state.pending)
@@ -1067,7 +1070,7 @@ def receive_folder(
         dest, len(done_files), total_bytes, stream.repaired, resumed, stats.skipped,
         dest / report.name, complete=not incomplete, missing=sorted(stats.failed),
         lost_stripes=sorted(stats.lost_stripes), renamed=state.names.renamed(),
-        selected=selected is not None, without_manifest=synthetic)
+        selected=selected is not None, without_manifest=synthetic, sender=man.get("sender"))
 
 
 # ---------------------------------------------------------------- verify only

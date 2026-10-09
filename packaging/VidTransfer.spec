@@ -10,7 +10,8 @@ from vidtransfer import __version__  # noqa: E402
 a = Analysis(
     [os.path.join(SPECPATH, "launcher.py")],
     pathex=[os.path.join(SPECPATH, "..", "src")],
-    hiddenimports=["vidtransfer.gui", "vidtransfer.sender", "vidtransfer.receiver"],
+    # tkinterdnd2: its native tkdnd library is collected by the hook in pyinstaller-hooks-contrib
+    hiddenimports=["vidtransfer.gui", "vidtransfer.sender", "vidtransfer.receiver", "tkinterdnd2"],
     excludes=["pytest", "unittest", "pydoc", "PyInstaller"],
 )
 pyz = PYZ(a.pure)

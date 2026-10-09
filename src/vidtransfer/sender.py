@@ -153,7 +153,7 @@ def _choose_target(drive_root: Path, name: str, signature: str, opts: SendOption
         cand = drive_root / (name if i == 1 else f"{name} ({i})")
         i += 1
         if not cand.exists():
-            cand.mkdir(parents=True)
+            cand.mkdir()
             return cand, uuid.uuid4().bytes, None
         if not cand.is_dir():
             continue
@@ -298,7 +298,22 @@ def _write_records(sink: "_StripeSink", entries: list[SourceEntry], opts: SendOp
     writer.write_end()
 
 
-# ---------------------------------------------------------------- entry point
+# ---------------------------------------------------------------- entry points
+
+class DriveFolderMissingError(FileNotFoundError):
+    """The (Google Drive) target folder does not exist – e.g. Drive is not running."""
+
+
+class SourceMissingError(FileNotFoundError):
+    """A folder or file to send no longer exists (moved, deleted, drive unplugged)."""
+
+
+def _check_drive_root(drive_root: Path) -> Path:
+    drive_root = Path(drive_root)
+    if not drive_root.is_dir():
+        raise DriveFolderMissingError(f"Drive-Ordner {drive_root} nicht gefunden")
+    return drive_root
+
 
 def send_folder(
     src: Path,
@@ -306,33 +321,69 @@ def send_folder(
     opts: Optional[SendOptions] = None,
     progress: ProgressFn = null_progress,
     cancel: Optional[threading.Event] = None,
+    sender: Optional[str] = None,
 ) -> SendResult:
-    opts = opts or SendOptions()
-    opts.validate()
+    """Send one folder; the delivery gets the folder's name."""
     src = Path(src).resolve()
-    drive_root = Path(drive_root)
     if not src.is_dir():
-        raise NotADirectoryError(f"{src} ist kein Ordner")
-    if not drive_root.is_dir():
-        raise FileNotFoundError(f"Drive-Ordner {drive_root} nicht gefunden")
+        raise SourceMissingError(f"Ordner {src} nicht gefunden")
+    drive_root = _check_drive_root(drive_root)
     if drive_root.resolve() == src or src in drive_root.resolve().parents:
         raise ValueError("Der Drive-Ordner darf nicht im Quellordner liegen")
-
     progress(0, 0, "Ordner wird eingelesen …")
-    entries = scan_source(src)
+    return _send(src.name, scan_source(src), drive_root, opts, progress, cancel, sender, str(src))
+
+
+def send_files(
+    files: list[Path],
+    name: str,
+    drive_root: Path,
+    opts: Optional[SendOptions] = None,
+    progress: ProgressFn = null_progress,
+    cancel: Optional[threading.Event] = None,
+    sender: Optional[str] = None,
+) -> SendResult:
+    """Send loose files as one delivery called `name` (files end up side by side)."""
+    drive_root = _check_drive_root(drive_root)
+    entries: list[SourceEntry] = []
+    taken: set[str] = set()
+    for f in files:
+        f = Path(f)
+        if not f.is_file():
+            raise SourceMissingError(f"Datei {f} nicht gefunden")
+        rel = unicodedata.normalize("NFC", f.name)
+        n, stem, suffix = 2, Path(rel).stem, Path(rel).suffix
+        while rel.casefold() in taken:               # same name from different folders
+            rel = f"{stem} ({n}){suffix}"
+            n += 1
+        taken.add(rel.casefold())
+        st = f.stat()
+        entries.append(SourceEntry(rel, f, False, st.st_size, int(st.st_mtime)))
+    if not entries:
+        raise ValueError("keine Dateien zum Senden")
+    entries.sort(key=lambda e: e.rel)
+    return _send(name, entries, drive_root, opts, progress, cancel, sender, f"{len(entries)} files")
+
+
+def _send(name: str, entries: list[SourceEntry], drive_root: Path, opts: Optional[SendOptions],
+          progress: ProgressFn, cancel: Optional[threading.Event], sender: Optional[str],
+          what: str) -> SendResult:
+    opts = opts or SendOptions()
+    opts.validate()
     total_bytes = sum(e.size for e in entries)
     signature = source_signature(entries)
 
-    target, tid, old_manifest = _choose_target(drive_root, src.name, signature, opts)
+    target, tid, old_manifest = _choose_target(drive_root, name, signature, opts)
     resumed = old_manifest is not None
-    log.info("Sending %s -> %s (%s, %s)", src, target, human_bytes(total_bytes),
+    log.info("Sending %s -> %s (%s, %s)", what, target, human_bytes(total_bytes),
              "resumed" if resumed else "new")
 
     v2 = opts.format_version == 2
     manifest = {
         "format_version": opts.format_version,
         "transfer_id": tid.hex(),
-        "name": src.name,
+        "name": name,
+        "sender": sender,
         "created_at": (old_manifest or {}).get("created_at")
         or datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "app_version": __version__,
@@ -344,7 +395,7 @@ def send_folder(
                   for e in entries if not e.is_dir],
         "dirs": [{"path": e.rel, "mtime": e.mtime} if v2 else e.rel for e in entries if e.is_dir],
     }
-    atomic_write_bytes(target / README_NAME, README_TEXT.format(name=src.name).encode("utf-8"))
+    atomic_write_bytes(target / README_NAME, README_TEXT.format(name=name).encode("utf-8"))
     # Never downgrade a completed manifest while re-sending (a receiver may be using it)
     keep_complete = bool(old_manifest and old_manifest.get("status") == STATUS_COMPLETE)
     if not keep_complete:

@@ -42,8 +42,10 @@ def log_dir() -> Path:
 
 @dataclass
 class Config:
+    mode: str = "send"                        # last mode of the window: "send" or "receive"
+    sender_name: Optional[str] = None         # shown to the receiver; default: computer name
     drive_root: Optional[str] = None          # target folder for sending (Google Drive or a local test folder)
-    receive_dir: Optional[str] = None         # last destination chosen for receiving
+    receive_dir: Optional[str] = None         # inbox for received deliveries (default: desktop.default_inbox())
     last_send_dir: Optional[str] = None       # folder last opened in the "send folder" dialog
     last_transfer_dir: Optional[str] = None   # folder last opened in the "receive"/"verify" dialogs
     k: int = 10
@@ -85,6 +87,9 @@ class Config:
         fresh.save()
         for f in fields(self):
             setattr(self, f.name, getattr(fresh, f.name))
+
+    def history_path(self) -> Path:
+        return config_dir() / "history.json"
 
     def send_options(self) -> SendOptions:
         return SendOptions(k=self.k, m=self.m, block_size=self.block_mib * MIB, zstd_level=self.zstd_level)

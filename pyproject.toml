@@ -10,6 +10,7 @@ requires-python = ">=3.10"
 dependencies = [
     "zfec>=1.6",
     "zstandard>=0.22",
+    "tkinterdnd2>=0.4",   # drag & drop onto the window (optional at runtime)
 ]
 
 [project.optional-dependencies]
