@@ -1,9 +1,11 @@
-"""Sender: folder → tar → zstd → stripes → packets in the Drive folder.
+"""Sender: folder → record container (v2) → stripes → packets in the Drive folder.
 
-The generated stream is deterministic (sorted files, normalised tar headers,
-single-threaded zstd). Restarting an interrupted transfer therefore produces
-exactly the same packets: identical packets already in Drive are skipped,
-damaged ones are replaced.
+The generated stream is deterministic (sorted files, fixed record headers,
+deterministic per-file compression decisions, single-threaded zstd).
+Restarting an interrupted transfer therefore produces exactly the same
+packets: identical packets already in Drive are skipped, damaged ones are
+replaced. Format v1 (one zstd-compressed tar stream) can still be written via
+`SendOptions(format_version=1)` to test backwards compatibility.
 """
 
 from __future__ import annotations
@@ -27,8 +29,9 @@ import zstandard
 
 from vidtransfer import __version__
 from vidtransfer.erasure import encode_stripe
+from vidtransfer.container import RecordWriter
 from vidtransfer.manifest import (
-    STATUS_COMPLETE, STATUS_IN_PROGRESS, read_manifest, write_manifest,
+    FORMAT_VERSION, STATUS_COMPLETE, STATUS_IN_PROGRESS, format_version, read_manifest, write_manifest,
 )
 from vidtransfer.packet import PacketHeader, read_header, verify_packet
 from vidtransfer.util import (
@@ -59,18 +62,24 @@ class SendOptions:
     m: int = 3                   # parity packets per stripe
     block_size: int = 32 * MIB   # payload size of one packet
     zstd_level: int = 3          # 0 = no compression
+    format_version: int = FORMAT_VERSION   # 2 = record container; 1 = legacy tar stream
 
     def validate(self) -> None:
         if not (1 <= self.k <= 99 and 0 <= self.m <= 99 and self.k + self.m <= 100):
             raise ValueError("k/m außerhalb des erlaubten Bereichs (k+m ≤ 100)")
         if self.block_size < 4096:
             raise ValueError("Blockgröße zu klein")
+        if self.format_version not in (1, 2):
+            raise ValueError(f"unbekanntes Format {self.format_version}")
 
     def params(self) -> dict:
+        if self.format_version == 1:
+            compression = "zstd" if self.zstd_level else "none"
+        else:
+            compression = "per-file" if self.zstd_level else "none"
         return {
             "k": self.k, "m": self.m, "block_size": self.block_size,
-            "compression": "zstd" if self.zstd_level else "none",
-            "zstd_level": self.zstd_level,
+            "compression": compression, "zstd_level": self.zstd_level,
         }
 
 
@@ -142,7 +151,8 @@ def _choose_target(drive_root: Path, name: str, signature: str, opts: SendOption
         if not cand.is_dir():
             continue
         man = read_manifest(cand)
-        if man and man.get("source_signature") == signature and man.get("params") == opts.params():
+        if (man and man.get("source_signature") == signature and man.get("params") == opts.params()
+                and format_version(man) == opts.format_version):
             return cand, bytes.fromhex(man["transfer_id"]), man
         if not any(not _ignored(p.name) for p in cand.iterdir()):
             return cand, uuid.uuid4().bytes, None
@@ -231,6 +241,56 @@ def _publish(packet: Path, hdr: PacketHeader, target: Path) -> bool:
     return True
 
 
+# ---------------------------------------------------------------- stream writers
+
+def _write_tar_stream(sink: "_StripeSink", entries: list[SourceEntry], opts: SendOptions,
+                      manifest: dict, on_bytes, cancel) -> None:
+    """Format v1: one zstd-compressed tar stream (kept for compatibility tests)."""
+    if opts.zstd_level:
+        cctx = zstandard.ZstdCompressor(level=opts.zstd_level, write_checksum=True, threads=0)
+        stream = cctx.stream_writer(sink, closefd=False)
+    else:
+        stream = sink
+    file_hashes: dict[str, str] = {}
+    with tarfile.open(fileobj=stream, mode="w|", format=tarfile.PAX_FORMAT) as tar:
+        for e in entries:
+            check_cancel(cancel)
+            ti = tarfile.TarInfo(e.rel)
+            ti.mtime = e.mtime
+            ti.uid = ti.gid = 0
+            ti.uname = ti.gname = ""
+            if e.is_dir:
+                ti.type = tarfile.DIRTYPE
+                ti.mode = 0o755
+                tar.addfile(ti)
+                continue
+            ti.size = e.size
+            ti.mode = 0o644
+            with open(e.path, "rb") as f:
+                reader = _HashingReader(f, on_bytes, cancel)
+                tar.addfile(ti, reader)
+            file_hashes[e.rel] = reader.sha.hexdigest()
+    if stream is not sink:
+        stream.close()
+    for f in manifest["files"]:
+        f["sha256"] = file_hashes[f["path"]]
+
+
+def _write_records(sink: "_StripeSink", entries: list[SourceEntry], opts: SendOptions,
+                   manifest: dict, on_bytes, cancel) -> None:
+    """Format v2: one record per file/directory; fills the manifest index as it goes."""
+    writer = RecordWriter(sink, opts.zstd_level, on_bytes, cancel)
+    files = {f["path"]: f for f in manifest["files"]}
+    dirs = {d["path"]: d for d in manifest["dirs"]}
+    for e in entries:
+        check_cancel(cancel)
+        if e.is_dir:
+            dirs[e.rel]["offset"] = writer.write_dir(e.rel, e.mtime)
+        else:
+            files[e.rel].update(writer.write_file(e.path, e.rel, e.size, e.mtime))
+    writer.write_end()
+
+
 # ---------------------------------------------------------------- entry point
 
 def send_folder(
@@ -261,7 +321,9 @@ def send_folder(
     log.info("Sending %s -> %s (%s, %s)", src, target, human_bytes(total_bytes),
              "resumed" if resumed else "new")
 
+    v2 = opts.format_version == 2
     manifest = {
+        "format_version": opts.format_version,
         "transfer_id": tid.hex(),
         "name": src.name,
         "created_at": (old_manifest or {}).get("created_at")
@@ -271,11 +333,14 @@ def send_folder(
         "params": opts.params(),
         "source_signature": signature,
         "source_bytes": total_bytes,
-        "files": [{"path": e.rel, "size": e.size} for e in entries if not e.is_dir],
-        "dirs": [e.rel for e in entries if e.is_dir],
+        "files": [{"path": e.rel, "size": e.size, **({"mtime": e.mtime} if v2 else {})}
+                  for e in entries if not e.is_dir],
+        "dirs": [{"path": e.rel, "mtime": e.mtime} if v2 else e.rel for e in entries if e.is_dir],
     }
     atomic_write_bytes(target / README_NAME, README_TEXT.format(name=src.name).encode("utf-8"))
-    if not (old_manifest and old_manifest.get("status") == STATUS_COMPLETE):
+    # Never downgrade a completed manifest while re-sending (a receiver may be using it)
+    keep_complete = bool(old_manifest and old_manifest.get("status") == STATUS_COMPLETE)
+    if not keep_complete:
         write_manifest(target, manifest)
 
     staging = Path(tempfile.mkdtemp(prefix="vidtransfer-send-"))
@@ -306,36 +371,15 @@ def send_folder(
             else:
                 skipped += 1
         log.info("Stripe %d done (%s)", stripe, human_bytes(length))
+        if v2 and not keep_complete:
+            # Incremental manifest: the receiver can already map finished files
+            manifest["packets"] = packet_hashes
+            write_manifest(target, manifest)
 
     try:
         sink = _StripeSink(staging, opts.k * opts.block_size, on_stripe)
-        if opts.zstd_level:
-            cctx = zstandard.ZstdCompressor(level=opts.zstd_level, write_checksum=True, threads=0)
-            stream = cctx.stream_writer(sink, closefd=False)
-        else:
-            stream = sink
-
-        file_hashes: dict[str, str] = {}
-        with tarfile.open(fileobj=stream, mode="w|", format=tarfile.PAX_FORMAT) as tar:
-            for e in entries:
-                check_cancel(cancel)
-                ti = tarfile.TarInfo(e.rel)
-                ti.mtime = e.mtime
-                ti.uid = ti.gid = 0
-                ti.uname = ti.gname = ""
-                if e.is_dir:
-                    ti.type = tarfile.DIRTYPE
-                    ti.mode = 0o755
-                    tar.addfile(ti)
-                    continue
-                ti.size = e.size
-                ti.mode = 0o644
-                with open(e.path, "rb") as f:
-                    reader = _HashingReader(f, on_bytes, cancel)
-                    tar.addfile(ti, reader)
-                file_hashes[e.rel] = reader.sha.hexdigest()
-        if stream is not sink:
-            stream.close()
+        writer = _write_records if v2 else _write_tar_stream
+        writer(sink, entries, opts, manifest, on_bytes, cancel)
         sink.close()
 
         manifest.update(
@@ -346,8 +390,6 @@ def send_folder(
             stream_bytes=sink.total,
             packets=packet_hashes,
         )
-        for f in manifest["files"]:
-            f["sha256"] = file_hashes[f["path"]]
         write_manifest(target, manifest)
     except Cancelled:
         log.info("Sending cancelled")

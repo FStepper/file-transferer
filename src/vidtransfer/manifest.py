@@ -10,7 +10,8 @@ from typing import Optional
 from vidtransfer.util import atomic_write_bytes
 
 FORMAT = "vidtransfer"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2              # 1 = zstd-compressed tar stream, 2 = record container
+SUPPORTED_VERSIONS = (1, 2)
 MANIFEST_NAMES = ("manifest.json", "manifest.2.json", "manifest.3.json")
 
 STATUS_IN_PROGRESS = "in_progress"
@@ -25,7 +26,7 @@ def _checksum(body: dict) -> str:
 def write_manifest(folder: Path, data: dict) -> None:
     body = {k: v for k, v in data.items() if k != "checksum"}
     body["format"] = FORMAT
-    body["format_version"] = FORMAT_VERSION
+    body.setdefault("format_version", FORMAT_VERSION)
     body["checksum"] = _checksum(body)
     raw = json.dumps(body, indent=1, sort_keys=True, ensure_ascii=False).encode("utf-8")
     for name in MANIFEST_NAMES:
@@ -39,7 +40,7 @@ def _load_one(path: Path) -> Optional[dict]:
         return None
     if not isinstance(data, dict) or data.get("format") != FORMAT:
         return None
-    if data.get("format_version") != FORMAT_VERSION:
+    if data.get("format_version") not in SUPPORTED_VERSIONS:
         return None
     body = {k: v for k, v in data.items() if k != "checksum"}
     return data if data.get("checksum") == _checksum(body) else None
@@ -55,6 +56,10 @@ def read_manifest(folder: Path) -> Optional[dict]:
         if m.get("status") == STATUS_COMPLETE:
             return m
     return found[0] if found else None
+
+
+def format_version(man: dict) -> int:
+    return man.get("format_version", 1)
 
 
 def is_transfer_folder(folder: Path) -> bool:

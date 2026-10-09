@@ -34,8 +34,9 @@ from typing import Optional
 import zstandard
 
 from vidtransfer import __version__
+from vidtransfer.container import T_END, T_DIR, T_FILE, ContainerError, RecordReader
 from vidtransfer.erasure import decode_stripe
-from vidtransfer.manifest import STATUS_COMPLETE, read_manifest
+from vidtransfer.manifest import STATUS_COMPLETE, format_version, read_manifest
 from vidtransfer.packet import HEADER_SIZE, data_len, packet_name, parse_packet_name, read_header
 from vidtransfer.prefetch import LOOKAHEAD, PacketVerifier, StripeCheck
 from vidtransfer.util import (
@@ -155,6 +156,12 @@ class _StripeStream:
 
     Packets are verified by a `PacketVerifier` in background threads; the next
     `LOOKAHEAD` stripes are prefetched while the current one is being unpacked.
+
+    `pos` is the absolute stream position of the next byte. `skip_to()` moves it
+    forward; stripes that are skipped entirely are never loaded (this is what
+    makes resuming and selective restores cheap with the v2 index). All stripes
+    except the last are exactly k × block_size bytes, so positions map directly
+    to stripes.
     """
 
     def __init__(self, folder: Path, work: Path, progress: ProgressFn, cancel, wait: bool,
@@ -170,13 +177,20 @@ class _StripeStream:
         self._own_verifier = verifier is None
         self.verifier = verifier or PacketVerifier(folder, self.manifest, cancel)
         self.stalled_packets: set[str] = set()
-        self.stripe = 0
-        self.consumed = 0
+        self.stripe_bytes = self.k * p["block_size"]
+        self.stripe = 0              # next stripe to load
+        self.pos = 0                 # absolute stream position of the next byte
         self.repaired = 0
+        self.loaded_stripes = 0
         self._segments: list[tuple[Path, int, int]] = []  # (file, offset, length)
         self._fh = None
         self._remaining = 0
+        self._skip_in_stripe = 0     # bytes to drop at the start of the next loaded stripe
         self._eof = False
+
+    @property
+    def consumed(self) -> int:
+        return self.pos
 
     # -- progress
     def total(self) -> int:
@@ -256,7 +270,19 @@ class _StripeStream:
             log.info("Waiting for stripe %d (%d/%d valid)", s, len(valid), self.k)
             sleep_cancellable(POLL_SECONDS, self.cancel)
 
-    # -- file-like interface for zstd/tarfile
+    # -- file-like interface for zstd/tarfile/RecordReader
+    def _drop_from_segments(self, n: int) -> int:
+        """Remove up to n bytes from the front of the loaded segments; returns the rest."""
+        while n and self._segments:
+            path, off, length = self._segments[0]
+            if n >= length:
+                self._segments.pop(0)
+                n -= length
+            else:
+                self._segments[0] = (path, off + n, length - n)
+                n = 0
+        return n
+
     def _next_segment(self) -> bool:
         if self._fh:
             self._fh.close()
@@ -266,11 +292,39 @@ class _StripeStream:
                 self._eof = True
                 return False
             self.stripe += 1
+            self.loaded_stripes += 1
+            if self._skip_in_stripe:
+                left = self._drop_from_segments(self._skip_in_stripe)
+                self._skip_in_stripe = 0
+                if left:
+                    raise TransferError("Sprungziel liegt hinter dem Ende des Stripes")
         path, off, length = self._segments.pop(0)
         self._fh = open(path, "rb")
         self._fh.seek(off)
         self._remaining = length
         return True
+
+    def skip_to(self, target: int) -> None:
+        """Move forward to absolute stream position `target` without loading skipped stripes."""
+        n = target - self.pos
+        if n < 0:
+            raise ValueError("can only skip forward")
+        if not n:
+            return
+        take = min(n, self._remaining)          # 1) within the open segment
+        if take:
+            self._fh.seek(take, 1)
+            self._remaining -= take
+            n -= take
+        n = self._drop_from_segments(n)         # 2) within the loaded stripe
+        if n:                                   # 3) jump to the stripe containing target
+            if self._fh:
+                self._fh.close()
+                self._fh = None
+            self._remaining = 0
+            self.stripe = target // self.stripe_bytes
+            self._skip_in_stripe = target - self.stripe * self.stripe_bytes
+        self.pos = target
 
     def readable(self) -> bool:
         return True
@@ -287,7 +341,7 @@ class _StripeStream:
                 raise TransferError("Paket wurde während des Lesens verändert")
             self._remaining -= len(chunk)
             out += chunk
-        self.consumed += len(out)
+        self.pos += len(out)
         return bytes(out)
 
     def close(self) -> None:
@@ -395,6 +449,101 @@ class _UnpackStats:
 
 def _unpack(stream: _StripeStream, partial: Path, state: _ReceiveState,
             progress: ProgressFn, cancel) -> _UnpackStats:
+    if format_version(stream.manifest) >= 2:
+        return _unpack_records(stream, partial, state, progress, cancel)
+    return _unpack_tar(stream, partial, state, progress, cancel)
+
+
+def _resume_position(man: dict, partial: Path, state: _ReceiveState) -> tuple[int, int]:
+    """(stream position to start at, number of finished files before it) – v2 only.
+
+    Finished files that were changed or removed in the meantime are dropped from
+    the state first, so they are written again.
+    """
+    for rel, entry in list(state.done.items()):
+        target = _safe_target(partial, rel)
+        if target is None or not _unchanged(target, entry):
+            del state.done[rel]
+    pos, skipped = 0, 0
+    for f in man["files"]:                       # manifest order == stream order
+        if f["path"] not in state.done:
+            return (f["offset"] if "offset" in f else pos), skipped
+        if "offset" not in f:
+            break
+        pos = f["offset"] + f["length"]
+        skipped += 1
+    return pos, skipped
+
+
+def _unpack_records(stream: _StripeStream, partial: Path, state: _ReceiveState,
+                    progress: ProgressFn, cancel) -> _UnpackStats:
+    """Format v2: each file is verified via its trailer as soon as it is complete."""
+    stats = _UnpackStats()
+    reader = RecordReader(stream, cancel)
+    index_for, index = None, {}
+
+    start, stats.skipped = _resume_position(stream.manifest, partial, state)
+    if start:
+        log.info("Resuming at stream position %d (%d finished file(s) skipped)", start, stats.skipped)
+        progress(start, stream.total(), f"Springe zu Position {human_bytes(start)} "
+                                        f"({stats.skipped} Datei(en) bereits fertig) …")
+        stream.skip_to(start)
+    try:
+        while True:
+            check_cancel(cancel)
+            rec = reader.next()
+            if rec.type == T_END:
+                break
+            if index_for is not stream.manifest:
+                index_for, index = stream.manifest, {f["path"]: f for f in stream.manifest["files"]}
+            target = _safe_target(partial, rec.path)
+            if target is None:
+                log.warning("Skipping unsafe path: %r", rec.path)
+                if rec.type == T_FILE:
+                    reader.skip_data(rec, None)
+                continue
+            if rec.type == T_DIR:
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+
+            rel = rec.path
+            entry = index.get(rel, {})
+            if rel in state.done and _unchanged(target, state.done[rel]):
+                stats.skipped += 1
+                reader.skip_data(rec, entry.get("length"))
+                continue
+            state.done.pop(rel, None)
+
+            target.parent.mkdir(parents=True, exist_ok=True)
+            part = _part_path(target)
+            with open(part, "wb") as out:
+                sha = reader.read_data(rec, out.write)
+                out.flush()
+                os.fsync(out.fileno())
+            os.utime(part, (rec.mtime, rec.mtime))
+            if entry.get("sha256") and entry["sha256"] != sha:
+                part.unlink()
+                raise TransferError(f"Prüfsumme falsch: {rel} – bitte erneut empfangen")
+            os.replace(part, target)
+            state.done[rel] = {"size": rec.size, "sha256": sha, "mtime": int(rec.mtime)}
+            state.save()
+            stats.written += 1
+            progress(stream.consumed, stream.total(), f"Entpackt: {rel}")
+    except ContainerError as exc:
+        # Every packet passed its SHA-256 check, so the data was most likely read
+        # incorrectly (transient I/O or memory error). Finished files are kept.
+        log.error("Stream could not be decoded: %s", exc)
+        raise TransferError(f"Datenstrom fehlerhaft gelesen ({exc}). Bitte erneut empfangen – "
+                            "fertige Dateien bleiben erhalten.") from exc
+    finally:
+        state.save()
+    log.info("Loaded %d stripe(s) for this receive", stream.loaded_stripes)
+    return stats
+
+
+def _unpack_tar(stream: _StripeStream, partial: Path, state: _ReceiveState,
+                progress: ProgressFn, cancel) -> _UnpackStats:
+    """Format v1: zstd-compressed tar stream; hashes come from the manifest."""
     stats = _UnpackStats()
     hashes_for, hashes = None, {}
     tar, source = _open_tar(stream, stream.manifest)
@@ -499,6 +648,23 @@ def _finalize(partial: Path, state: _ReceiveState, man: dict) -> None:
                             "betroffenen Dateien neu):\n" + "\n".join(errors[:20]) + more)
 
 
+def _dir_mtimes(partial: Path, man: dict, stats: _UnpackStats) -> list[tuple[Path, int]]:
+    """Directories (deepest first) with their original mtime; creates missing ones (v2).
+
+    With v2, directory records may have been skipped when resuming, so the
+    manifest is the source of truth (this also covers empty directories).
+    """
+    if format_version(man) < 2:
+        return list(reversed(stats.dir_mtimes))
+    out = []
+    for d in man.get("dirs", []):
+        target = _safe_target(partial, d["path"])
+        if target is not None:
+            target.mkdir(parents=True, exist_ok=True)
+            out.append((target, d["mtime"]))
+    return sorted(out, key=lambda t: len(t[0].parts), reverse=True)
+
+
 def _write_report(dest: Path, man: dict, state: _ReceiveState, repaired: int,
                   skipped: int, started: datetime, seconds: float) -> Path:
     p = man["params"]
@@ -596,7 +762,7 @@ def receive_folder(
     report = _write_report(partial, man, state, stream.repaired, stats.skipped,
                            started, time.monotonic() - t0)
     (partial / STATE_NAME).unlink(missing_ok=True)
-    for path, mtime in reversed(stats.dir_mtimes):
+    for path, mtime in _dir_mtimes(partial, man, stats):
         os.utime(path, (mtime, mtime))
     if final.exists():
         final = unique_path(final)
@@ -666,6 +832,44 @@ def verify_transfer(
     return res
 
 
+def _hash_records(stream: _StripeStream, res: VerifyResult, got: dict, progress: ProgressFn, cancel) -> None:
+    reader = RecordReader(stream, cancel)
+    while True:
+        check_cancel(cancel)
+        rec = reader.next()
+        if rec.type == T_END:
+            return
+        if rec.type == T_FILE:
+            got[rec.path] = reader.read_data(rec, lambda _b: None)   # also checks the trailer
+            res.bytes_checked += rec.size
+            progress(stream.consumed, stream.total(), f"Prüfe Inhalt: {rec.path}")
+
+
+def _hash_tar(stream: _StripeStream, man: dict, res: VerifyResult, got: dict,
+              progress: ProgressFn, cancel) -> None:
+    tar, source = _open_tar(stream, man)
+    try:
+        for member in tar:
+            check_cancel(cancel)
+            if not member.isfile():
+                continue
+            h = hashlib.sha256()
+            src = tar.extractfile(member)
+            while True:
+                check_cancel(cancel)
+                chunk = src.read(COPY_CHUNK)
+                if not chunk:
+                    break
+                h.update(chunk)
+            got[member.name] = h.hexdigest()
+            res.bytes_checked += member.size
+            progress(stream.consumed, stream.total(), f"Prüfe Inhalt: {member.name}")
+    finally:
+        tar.close()
+        if source is not None:
+            source.close()
+
+
 def _verify_content(folder: Path, man: dict, res: VerifyResult, verifier: PacketVerifier,
                     progress: ProgressFn, cancel) -> None:
     """Decode the whole stream and compare every file hash with the manifest."""
@@ -673,28 +877,11 @@ def _verify_content(folder: Path, man: dict, res: VerifyResult, verifier: Packet
     stream = _StripeStream(folder, work, progress, cancel, wait=False, verifier=verifier)
     got: dict[str, str] = {}
     try:
-        tar, source = _open_tar(stream, man)
-        try:
-            for member in tar:
-                check_cancel(cancel)
-                if not member.isfile():
-                    continue
-                h = hashlib.sha256()
-                src = tar.extractfile(member)
-                while True:
-                    check_cancel(cancel)
-                    chunk = src.read(COPY_CHUNK)
-                    if not chunk:
-                        break
-                    h.update(chunk)
-                got[member.name] = h.hexdigest()
-                res.bytes_checked += member.size
-                progress(stream.consumed, stream.total(), f"Prüfe Inhalt: {member.name}")
-        finally:
-            tar.close()
-            if source is not None:
-                source.close()
-    except (TransferError, tarfile.TarError, zstandard.ZstdError) as exc:
+        if format_version(man) >= 2:
+            _hash_records(stream, res, got, progress, cancel)
+        else:
+            _hash_tar(stream, man, res, got, progress, cancel)
+    except (TransferError, ContainerError, tarfile.TarError, zstandard.ZstdError) as exc:
         res.content_errors.append(f"Datenstrom nicht lesbar: {exc}")
     finally:
         stream.close()
