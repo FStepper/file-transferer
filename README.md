@@ -54,6 +54,26 @@ completely recoverable. This is useful before the sender deletes the original da
 > read. That works, but it is slower. You can mark the transfer folder as
 > "Available offline" in Drive.
 
+## Testing locally without Google Drive
+
+The target for sending does not have to be Google Drive: click **„Ändern …“**
+next to „Senden nach“ and choose any local folder, e.g. `D:\VidTransfer-Test`.
+The app keeps that choice (it is marked „eigener Ordner“) and never switches back
+to the Drive folder by itself. Sending writes the transfer folder there; to
+receive, choose that transfer folder via **„Aus Drive empfangen …“**.
+
+Every folder dialog remembers where it was last used (send source, transfer
+folder, receive destination). On the command line, the target is given with
+`--drive`:
+
+```bash
+vidtransfer send "D:\Footage\Shoot" --drive "D:\VidTransfer-Test"
+vidtransfer receive "D:\VidTransfer-Test\Shoot" "D:\Restored"
+```
+
+To keep test settings separate from your normal ones, set the environment
+variable `VIDTRANSFER_CONFIG_DIR` to another folder before starting the app.
+
 ## Fault tolerance
 
 | Setting | Default | Meaning |

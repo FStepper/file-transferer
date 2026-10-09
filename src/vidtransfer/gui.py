@@ -139,10 +139,11 @@ class App:
 
         drv = ttk.Frame(main)
         drv.pack(fill="x", pady=(4, 8))
-        ttk.Label(drv, text="Google Drive:").pack(side="left")
-        self.drive_var = tk.StringVar(value=self.cfg.drive_root or "(wird beim ersten Senden gesucht)")
+        ttk.Label(drv, text="Senden nach:").pack(side="left")
+        self.drive_var = tk.StringVar()
         ttk.Label(drv, textvariable=self.drive_var, foreground="gray").pack(side="left", padx=6)
         ttk.Button(drv, text="Ändern …", command=lambda: self._drive_root(ask=True)).pack(side="right")
+        self._show_drive_root()
 
         self.progress = ttk.Progressbar(main, mode="determinate", maximum=1000)
         self.progress.pack(fill="x", pady=(8, 2))
@@ -176,51 +177,84 @@ class App:
         self.log_text.configure(state="disabled")
 
     # ------------------------------------------------------------ input
+    def _reload_config(self) -> None:
+        """Pick up settings another app window may have changed."""
+        self.cfg = Config.load()
+        self._show_drive_root()
+
+    def _show_drive_root(self) -> None:
+        cur = self.cfg.drive_root
+        if not cur:
+            self.drive_var.set("(Google Drive wird beim ersten Senden gesucht)")
+            return
+        local = Path(cur) not in find_drive_roots()
+        self.drive_var.set(cur + ("   (eigener Ordner, z. B. zum lokalen Testen)" if local else ""))
+
+    def _ask_dir(self, title: str, *initial: Optional[str]) -> Optional[Path]:
+        """Folder dialog starting in the first existing of `initial`."""
+        opts = dict(title=title, mustexist=True)
+        start = next((d for d in initial if d and Path(d).is_dir()), None)
+        if start:
+            opts["initialdir"] = str(start)
+        if IS_MAC:
+            opts["message"] = title
+        chosen = filedialog.askdirectory(**opts)
+        return Path(chosen) if chosen else None   # Path() also normalises "/" on Windows
+
     def _on_open_document(self, *paths: str) -> None:
         for p in paths:
             self.add_path(p)
 
     def _pick_send(self) -> None:
-        p = filedialog.askdirectory(title="Ordner zum Senden wählen", mustexist=True)
+        self._reload_config()
+        p = self._ask_dir("Ordner zum Senden wählen", self.cfg.last_send_parent, str(Path.home()))
         if p:
-            self.add_path(p, mode="send")
+            self.add_path(str(p), mode="send")
 
-    def _pick_transfer(self, title: str) -> Optional[str]:
-        initial = self.cfg.drive_root or str(default_cloudstorage_dir())
-        return filedialog.askdirectory(title=title, initialdir=initial, mustexist=True) or None
+    def _pick_transfer(self, title: str) -> Optional[Path]:
+        self._reload_config()
+        return self._ask_dir(title, self.cfg.last_transfer_parent, self.cfg.drive_root,
+                             str(default_cloudstorage_dir()))
 
     def _pick_receive(self) -> None:
-        p = self._pick_transfer("Transfer-Ordner in Google Drive wählen")
+        p = self._pick_transfer("Transfer-Ordner wählen (in Google Drive oder im Testordner)")
         if p:
-            self.add_path(p, mode="receive")
+            self.add_path(str(p), mode="receive")
 
     def _pick_verify(self) -> None:
         p = self._pick_transfer("Transfer-Ordner zum Prüfen wählen")
         if p:
-            self.add_path(p, mode="verify")
+            self.add_path(str(p), mode="verify")
 
     def _drive_root(self, ask: bool = False) -> Optional[Path]:
+        """Target folder for sending: the saved one; otherwise the only Drive found; otherwise ask.
+
+        Any folder can be chosen – e.g. a local folder to test without Google Drive.
+        A choice made by the user is never replaced automatically.
+        """
+        self._reload_config()
         cur = self.cfg.drive_root
         if not ask and cur and Path(cur).is_dir():
             return Path(cur)
+        if not ask and cur:
+            messagebox.showwarning(APP_NAME, f"Der Zielordner zum Senden existiert nicht mehr:\n{cur}\n"
+                                             "Bitte einen neuen wählen.")
         roots = find_drive_roots()
-        if not ask and len(roots) == 1:
-            chosen = str(roots[0])
+        if not ask and not cur and len(roots) == 1:
+            chosen = roots[0]
         else:
-            opts = dict(title="Google-Drive-Ordner wählen („Meine Ablage“ / „My Drive“)",
-                        initialdir=str(roots[0] if roots else default_cloudstorage_dir()), mustexist=True)
-            if IS_MAC:
-                opts["message"] = opts["title"]
-            chosen = filedialog.askdirectory(**opts)
-            if not chosen:
+            chosen = self._ask_dir("Zielordner zum Senden wählen (Google Drive „Meine Ablage“ oder "
+                                   "ein lokaler Testordner)",
+                                   cur, *(str(r) for r in roots), str(default_cloudstorage_dir()))
+            if chosen is None:
                 return None
-        self.cfg.drive_root = chosen
-        self.cfg.save()
-        self.drive_var.set(chosen)
-        self._log(f"Google-Drive-Ordner: {chosen}")
-        return Path(chosen)
+        self.cfg.update(drive_root=str(chosen))
+        self._show_drive_root()
+        self._log(f"Senden nach: {chosen}")
+        return chosen
 
     def add_path(self, raw: str, mode: Optional[str] = None) -> None:
+        self._reload_config()
         path = Path(raw)
         if not path.is_dir():
             messagebox.showwarning(APP_NAME, f"Bitte einen Ordner ziehen, keine Datei:\n{path.name}")
@@ -235,18 +269,19 @@ class App:
             drive = self._drive_root()
             if drive is None:
                 return
+            self.cfg.update(last_send_parent=str(path.parent))
             job = ("send", path, drive)
-        elif mode == "verify":
-            job = ("verify", path, None)
         else:
-            initial = self.cfg.receive_dir or str(Path.home() / "Downloads")
-            dest = filedialog.askdirectory(title=f"Wohin soll „{path.name}“ wiederhergestellt werden?",
-                                           initialdir=initial, mustexist=True)
-            if not dest:
-                return
-            self.cfg.receive_dir = dest
-            self.cfg.save()
-            job = ("receive", path, Path(dest))
+            self.cfg.update(last_transfer_parent=str(path.parent))
+            if mode == "verify":
+                job = ("verify", path, None)
+            else:
+                dest = self._ask_dir(f"Wohin soll „{path.name}“ wiederhergestellt werden?",
+                                     self.cfg.receive_dir, str(Path.home() / "Downloads"), str(Path.home()))
+                if dest is None:
+                    return
+                self.cfg.update(receive_dir=str(dest))
+                job = ("receive", path, dest)
 
         self.pending += 1
         label = {"send": "Senden", "receive": "Empfangen", "verify": "Prüfen"}[mode]

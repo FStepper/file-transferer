@@ -13,22 +13,27 @@ from typing import Optional
 
 from vidtransfer import APP_NAME
 from vidtransfer.sender import MIB, SendOptions
+from vidtransfer.util import atomic_write_bytes
+
+# Overrides the settings directory, e.g. for tests or a separate local test setup
+CONFIG_DIR_ENV = "VIDTRANSFER_CONFIG_DIR"
 
 
 def config_dir() -> Path:
-    if sys.platform == "darwin":
-        base = Path.home() / "Library" / "Application Support"
+    if os.environ.get(CONFIG_DIR_ENV):
+        d = Path(os.environ[CONFIG_DIR_ENV])
+    elif sys.platform == "darwin":
+        d = Path.home() / "Library" / "Application Support" / APP_NAME
     elif sys.platform == "win32":
-        base = Path(os.environ.get("APPDATA", Path.home()))
+        d = Path(os.environ.get("APPDATA", Path.home())) / APP_NAME
     else:
-        base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    d = base / APP_NAME
+        d = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP_NAME
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def log_dir() -> Path:
-    if sys.platform == "darwin":
+    if sys.platform == "darwin" and not os.environ.get(CONFIG_DIR_ENV):
         d = Path.home() / "Library" / "Logs" / APP_NAME
         d.mkdir(parents=True, exist_ok=True)
         return d
@@ -37,8 +42,10 @@ def log_dir() -> Path:
 
 @dataclass
 class Config:
-    drive_root: Optional[str] = None
-    receive_dir: Optional[str] = None
+    drive_root: Optional[str] = None          # target folder for sending (Google Drive or a local test folder)
+    receive_dir: Optional[str] = None         # last destination chosen for receiving
+    last_send_parent: Optional[str] = None    # where the "send folder" dialog starts
+    last_transfer_parent: Optional[str] = None  # where the "receive"/"verify" dialogs start
     k: int = 10
     m: int = 3
     block_mib: int = 32
@@ -58,7 +65,26 @@ class Config:
         return cls(**{k: v for k, v in raw.items() if k in names})
 
     def save(self) -> None:
-        self.path().write_text(json.dumps(asdict(self), indent=2, ensure_ascii=False), encoding="utf-8")
+        raw = json.dumps(asdict(self), indent=2, ensure_ascii=False).encode("utf-8")
+        atomic_write_bytes(self.path(), raw)
+
+    def update(self, **changes) -> None:
+        """Save only the given settings, merged into the current file.
+
+        Several app windows may be open at the same time (on Windows every folder
+        dropped onto the exe starts a new one). Saving the whole in-memory config
+        would overwrite settings another window changed in the meantime.
+        """
+        names = {f.name for f in fields(self)}
+        unknown = set(changes) - names
+        if unknown:
+            raise KeyError(f"unknown settings: {sorted(unknown)}")
+        fresh = Config.load()
+        for key, value in changes.items():
+            setattr(fresh, key, value)
+        fresh.save()
+        for f in fields(self):
+            setattr(self, f.name, getattr(fresh, f.name))
 
     def send_options(self) -> SendOptions:
         return SendOptions(k=self.k, m=self.m, block_size=self.block_mib * MIB, zstd_level=self.zstd_level)
