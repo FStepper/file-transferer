@@ -524,10 +524,23 @@ upload time estimates).
    (incremental), jump on resume, v1 stays readable
 8. ✔ **Unpacking, part 3:** `--only`, `list`, partial recovery, emergency mode
    without manifest, NFC/Windows name handling
-9. **UI, part 1 – mode switch and sending:** plain-language texts and error
+9. ✔ **UI, part 1 – mode switch and sending:** plain-language texts and error
    catalogue, main window with mode switch *Senden | Empfangen* (remembered),
    drop zone and delivery cards, settings window, sender name in the manifest,
-   drop onto the window, single files (U1–U4, U9, U20)
+   drop onto the window, single files (U1–U4, U9, U20). Notes from the
+   implementation:
+   - modules: `gui.py` (window, cards, settings), `friendly.py` (texts, error
+     catalogue, remaining time), `history.py` (delivery list, kept across
+     restarts; deliveries that were running become "Unterbrochen – Fortsetzen"),
+     `desktop.py` (Finder/Explorer, notifications, keep-awake, tkdnd)
+   - the mode "Empfangen" already receives dropped or chosen deliveries straight
+     into the inbox (no destination dialog); automatic receiving follows in phase 10
+   - "Details" is a link on cards with a problem; right-click on any card offers
+     Details / show in Finder / remove from the list
+   - drop onto the window via `tkinterdnd2`: verified in the PyInstaller build on
+     Windows (tkdnd 2.10.2); the macOS build collects `osx-arm64`/`osx-x64` via
+     the same hook and still has to be checked on a Mac
+   - the Mac is kept awake only while a job is running
 10. **UI, part 2 – receiving:** automatic receiving into the inbox, delivery list
     with sender name, incoming progress from the packet count, free up Drive space
     (U5, U6, U12, U21)

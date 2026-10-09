@@ -7,24 +7,43 @@ reconstructs them automatically, and every file is verified with SHA-256 at the 
 
 > The app's user interface is in German; this documentation is in English.
 
-## Usage (Mac)
+## Usage
+
+The window has a switch at the top: **Senden | Empfangen**. The app remembers the
+last mode. Each mode shows one drop zone and the list of deliveries; every
+delivery has one status line and at most one button. Everything else is in
+**Einstellungen** (computer name, Google Drive folder, inbox, verifying a
+delivery, log, advanced parameters).
 
 **Sending**
-1. Drag a folder (e.g. `Shoot Day 3`) onto the **VidTransfer icon** in the Dock or Finder.
-2. The app creates the folder `Shoot Day 3` in Google Drive and writes the packets into it.
-3. Google Drive uploads the packets. **Keep the app open until the upload is done**,
-   because it prevents the Mac from going to sleep.
+1. Drag a folder (e.g. `Shoot Day 3`) onto the window or onto the VidTransfer
+   icon in the Dock – or click **„Ordner auswählen …“**. Loose files can be
+   dropped too; they become one delivery called `Dateien <date>`.
+2. The card shows *Wird vorbereitet – 45 % · noch ca. 6 Min.*
+3. When it says **✔ Liegt in Google Drive**, the app's job is done. Google Drive
+   then uploads in the background – the Mac should stay online until Google Drive
+   shows it as synced. The app keeps the Mac awake only while it is preparing.
 
-Something went wrong (crash, restart, folder changed)? Just drag the same folder
-onto the app again. Existing packets are skipped and damaged ones replaced.
+Something went wrong (crash, restart, folder changed)? Click **Fortsetzen** or
+**Erneut senden** on the card, or drop the same folder again. Existing packets are
+skipped and damaged ones replaced.
 
-**Receiving (unpacking)**
-1. Drag the folder `Shoot Day 3` from Google Drive onto the VidTransfer icon,
-   or click **„Aus Drive empfangen …“**.
-2. Choose the destination (default: Downloads).
+**Receiving**
+1. Switch to **Empfangen**, then drag the delivery folder from Google Drive onto
+   the window (or click **„Lieferung auswählen …“**). Dropping a delivery in mode
+   „Senden“ works as well – the app switches over by itself.
+2. The delivery goes straight into the inbox, by default `~/Movies/VidTransfer`
+   (changeable in the settings). The card shows who sent it.
 3. The app verifies the packets, repairs missing ones, unpacks everything and
    verifies every file. This already works while the sender is still uploading;
-   the app then waits for the missing packets.
+   the card then says *Wartet auf Google Drive …*.
+4. **✔ Angekommen** – **„Im Finder zeigen“** opens the folder.
+
+Problems are shown in one plain sentence with one button that helps, e.g.
+*„Der Google-Drive-Ordner ist nicht erreichbar. Läuft Google Drive?“* →
+**Google Drive öffnen**, or *„Auf diesem Computer fehlen 35 GB Speicherplatz.“* →
+**Anderen Speicherort wählen**. The technical details are behind „Details“
+(or right-click on a card).
 
 How unpacking stays safe:
 - Everything is written to `Shoot Day 3 (receiving)` first. Only once every file has
@@ -32,11 +51,9 @@ How unpacking stays safe:
 - Each file is first written as a hidden `.<name>.vtpart` and only gets its real
   name once its SHA-256 matches. A half-written or corrupt file never appears under
   its real name.
-- **Interrupted?** (cancelled, crash, Mac switched off) Start receiving again and
-  pick the same destination. The app jumps straight to the first unfinished file;
-  finished files and the packets before it are not read again.
-- Every file is verified as soon as it is complete, even while the sender is
-  still uploading.
+- **Interrupted?** (stopped, crash, Mac switched off) Click **Fortsetzen**. The app
+  jumps straight to the first unfinished file; finished files and the packets
+  before it are not read again.
 - Before anything is written, the app checks that there is **enough free space**.
 - Packets are downloaded and verified **in parallel**, a few stripes ahead of the
   one being unpacked. A packet that hangs (e.g. a Drive placeholder that does not
@@ -47,11 +64,12 @@ How unpacking stays safe:
 **If parts are lost for good**
 
 If some packets are missing for good (the upload is complete, but Google Drive
-does not have them), the app asks whether everything else should be restored.
-The result is a folder `Shoot Day 3 (incomplete)`; the report lists the missing
-files. To complete it later, send the same folder again on the sending side
-(only the missing packets are written), then receive into the same destination
-again. The folder is then completed and renamed to `Shoot Day 3`.
+does not have them), the card says *„Ein Teil der Lieferung fehlt in Google
+Drive.“* → **Alles andere jetzt holen**. The result is a folder
+`Shoot Day 3 (incomplete)`; the card says how many files are missing and asks to
+send the folder again on the sending Mac (only the missing packets are written).
+Then click **Fehlende Dateien holen** – the folder is completed and renamed to
+`Shoot Day 3`.
 
 If the content list (manifest) of a delivery is unreadable, the app offers an
 emergency recovery from the packets alone. Every restored file is still
@@ -59,33 +77,33 @@ verified, but the app cannot tell whether files are missing.
 
 **Verify only**
 
-**„Nur prüfen …“** (or `vidtransfer verify`) downloads and checks all packets and
-the whole content, without unpacking anything. It reports whether the transfer is
-completely recoverable. This is useful before the sender deletes the original data.
+**Einstellungen → „Lieferung prüfen …“** (or `vidtransfer verify`) downloads and
+checks all packets and the whole content, without unpacking anything. It reports
+whether the delivery is completely recoverable.
 
 > Tip: In Drive's "Stream files" mode, packets are only downloaded when they are
-> read. That works, but it is slower. You can mark the transfer folder as
+> read. That works, but it is slower. You can mark the delivery folder as
 > "Available offline" in Drive.
 
 ## Testing locally without Google Drive
 
-The target for sending does not have to be Google Drive: click **„Ändern …“**
-next to „Senden nach“ and choose any local folder, e.g. `D:\VidTransfer-Test`.
-The app keeps that choice (it is marked „eigener Ordner“) and never switches back
-to the Drive folder by itself. Sending writes the transfer folder there; to
-receive, choose that transfer folder via **„Aus Drive empfangen …“**.
+The target for sending does not have to be Google Drive: in **Einstellungen**,
+click **„Ändern …“** next to „Senden nach (Google Drive)“ and choose any local
+folder, e.g. `D:\VidTransfer-Test`. The app keeps that choice and never switches
+back to the Drive folder by itself. Sending writes the delivery folder there; to
+receive, drop that delivery folder onto the window in mode „Empfangen“.
 
-Every folder dialog remembers where it was last used (send source, transfer
-folder, receive destination). On the command line, the target is given with
-`--drive`:
+Every folder dialog remembers the folder that was opened last. On the command
+line, the target is given with `--drive`:
 
 ```bash
 vidtransfer send "D:\Footage\Shoot" --drive "D:\VidTransfer-Test"
 vidtransfer receive "D:\VidTransfer-Test\Shoot" "D:\Restored"
 ```
 
-To keep test settings separate from your normal ones, set the environment
-variable `VIDTRANSFER_CONFIG_DIR` to another folder before starting the app.
+To keep test settings (and the delivery list) separate from your normal ones,
+set the environment variable `VIDTRANSFER_CONFIG_DIR` to another folder before
+starting the app.
 
 ## Fault tolerance
 
