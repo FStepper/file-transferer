@@ -1,4 +1,4 @@
-"""Findet den lokalen Ordner von Google Drive for desktop."""
+"""Locates the local folder of Google Drive for desktop."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import string
 import sys
 from pathlib import Path
 
-# Name des Wurzelordners je nach Sprache des Drive-Clients
+# Name of the root folder, depending on the Drive client's language
 MY_DRIVE_NAMES = ("My Drive", "Meine Ablage")
 
 
@@ -29,7 +29,7 @@ def find_drive_roots() -> list[Path]:
                         roots.append(base / n)
                 except OSError:
                     pass
-    # Spiegel-Modus / ältere Clients
+    # Mirror mode / older clients
     for n in (*MY_DRIVE_NAMES, "Google Drive"):
         if (home / n).is_dir():
             roots.append(home / n)

@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller-Spezifikation für das macOS-App-Bundle.
+# PyInstaller spec for the macOS app bundle (also builds a Windows exe for testing).
 #   pyinstaller --noconfirm --clean packaging/VidTransfer.spec
 import os
 import sys
@@ -22,7 +22,7 @@ exe = EXE(
     exclude_binaries=True,
     name="VidTransfer",
     console=False,
-    # Ordner-Drops kommen über ::tk::mac::OpenDocument an – keine argv-Emulation
+    # Folder drops arrive via ::tk::mac::OpenDocument – no argv emulation needed
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
@@ -45,8 +45,9 @@ if sys.platform == "darwin":
         "LSMinimumSystemVersion": "11.0",
         "NSHighResolutionCapable": True,
         "NSRequiresAquaSystemAppearance": False,
-        # Ordner dürfen auf das App-/Dock-Symbol gezogen werden.
-        # LSHandlerRank "None": nimmt Drops an, wird aber nie Standard-App für Ordner.
+        # Folders may be dropped onto the app / Dock icon.
+        # LSHandlerRank "None": accepts drops but never becomes the default app for folders.
+        # The usage descriptions below are shown to the user, hence German.
         "CFBundleDocumentTypes": [{
             "CFBundleTypeName": "Ordner",
             "CFBundleTypeRole": "Viewer",

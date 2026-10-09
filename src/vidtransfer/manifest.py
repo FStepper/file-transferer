@@ -1,4 +1,4 @@
-"""Manifest: Beschreibung eines Transfers, dreifach redundant im Drive-Ordner abgelegt."""
+"""Manifest: description of a transfer, stored three times in the Drive folder."""
 
 from __future__ import annotations
 
@@ -46,10 +46,9 @@ def _load_one(path: Path) -> Optional[dict]:
 
 
 def read_manifest(folder: Path) -> Optional[dict]:
-    """Erste gültige Kopie; eine abgeschlossene Kopie hat Vorrang.
+    """First valid copy; a completed copy takes precedence.
 
-    (Während Drive synchronisiert, können die drei Kopien kurzzeitig
-    unterschiedliche Stände haben.)
+    (While Drive is syncing, the three copies may briefly differ.)
     """
     found = [m for m in (_load_one(folder / n) for n in MANIFEST_NAMES) if m]
     for m in found:

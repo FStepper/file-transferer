@@ -1,19 +1,20 @@
-"""Kleine Hilfsfunktionen, die von Sender und Empfänger gemeinsam genutzt werden."""
+"""Small helpers shared by sender and receiver."""
 
 from __future__ import annotations
 
 import os
+import shutil
 import threading
 import time
 from pathlib import Path
 from typing import Callable, Optional
 
-# progress(erledigte_bytes, gesamt_bytes, meldung)
+# progress(done_bytes, total_bytes, message)
 ProgressFn = Callable[[int, int, str], None]
 
 
 class Cancelled(Exception):
-    """Der Benutzer hat den Vorgang abgebrochen."""
+    """The user cancelled the operation."""
 
 
 def check_cancel(cancel: Optional[threading.Event]) -> None:
@@ -29,10 +30,9 @@ def sleep_cancellable(seconds: float, cancel: Optional[threading.Event]) -> None
 
 
 def atomic_write_bytes(path: Path, data: bytes) -> None:
-    """Schreibt erst in eine temporäre Datei und benennt dann um.
+    """Write to a temporary file first, then rename.
 
-    So sieht der Drive-Client nie eine halb geschriebene Datei unter dem
-    endgültigen Namen.
+    This way the Drive client never sees a half-written file under its final name.
     """
     tmp = path.with_name(f".{path.name}.tmp")
     with open(tmp, "wb") as f:
@@ -40,6 +40,14 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, path)
+
+
+def free_space(path: Path) -> int:
+    """Free bytes on the volume containing `path` (or its nearest existing parent)."""
+    p = Path(path)
+    while not p.exists() and p.parent != p:
+        p = p.parent
+    return shutil.disk_usage(p).free
 
 
 def human_bytes(n: float) -> str:
@@ -50,8 +58,13 @@ def human_bytes(n: float) -> str:
     return f"{n:.1f} TB"
 
 
+def human_duration(seconds: float) -> str:
+    s = int(round(seconds))
+    return f"{s // 3600}:{s // 60 % 60:02d}:{s % 60:02d}"
+
+
 def unique_path(base: Path) -> Path:
-    """`base`, oder `base (2)`, `base (3)`, … falls schon vorhanden."""
+    """`base`, or `base (2)`, `base (3)`, … if it already exists."""
     if not base.exists():
         return base
     i = 2

@@ -1,5 +1,5 @@
-# Baut dist\windows\VidTransfer\VidTransfer.exe – zum lokalen Testen unter Windows.
-# Die Mac-App muss auf einem Mac bzw. per GitHub-Workflow gebaut werden.
+# Builds dist\windows\VidTransfer\VidTransfer.exe for local testing on Windows.
+# The Mac app has to be built on a Mac or via the GitHub workflow.
 #   powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
 $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
@@ -9,10 +9,10 @@ if (-not (Test-Path ".venv")) { python -m venv .venv }
 .\.venv\Scripts\python -m pip install -q -e ".[dev]"
 
 .\.venv\Scripts\python -m pytest -q
-if ($LASTEXITCODE -ne 0) { throw "Tests fehlgeschlagen" }
+if ($LASTEXITCODE -ne 0) { throw "Tests failed" }
 
 .\.venv\Scripts\python -m PyInstaller --noconfirm --clean `
     --distpath dist\windows --workpath build\windows packaging\VidTransfer.spec
-if ($LASTEXITCODE -ne 0) { throw "PyInstaller fehlgeschlagen" }
+if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 
-Write-Host "Fertig: dist\windows\VidTransfer\VidTransfer.exe"
+Write-Host "Done: dist\windows\VidTransfer\VidTransfer.exe"

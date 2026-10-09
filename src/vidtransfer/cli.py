@@ -1,4 +1,4 @@
-"""Kommandozeile. Ohne Argumente (bzw. nur mit Pfaden) startet die GUI."""
+"""Command line interface. Without arguments (or with paths only) the GUI starts."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from vidtransfer.config import Config, setup_logging
 from vidtransfer.drive import find_drive_roots
 from vidtransfer.util import Cancelled, human_bytes
 
-COMMANDS = {"send", "receive", "status", "gui"}
+COMMANDS = {"send", "receive", "verify", "status", "gui"}
 
 
 def _console_progress():
@@ -61,12 +61,21 @@ def cmd_send(a) -> int:
 
 
 def cmd_receive(a) -> int:
+    from vidtransfer.messages import receive_summary
     from vidtransfer.receiver import receive_folder
 
     res = receive_folder(Path(a.folder), Path(a.dest), _console_progress(), wait=not a.no_wait)
-    print(f"\nWiederhergestellt: {res.dest} ({res.files} Dateien, {human_bytes(res.bytes)}, "
-          f"{res.repaired_stripes} Stripe(s) repariert)")
+    print("\n" + receive_summary(res))
     return 0
+
+
+def cmd_verify(a) -> int:
+    from vidtransfer.messages import verify_summary
+    from vidtransfer.receiver import verify_transfer
+
+    res = verify_transfer(Path(a.folder), _console_progress(), deep=not a.quick)
+    print("\n" + verify_summary(res))
+    return 0 if res.ok or (a.quick and res.complete and not res.unrecoverable) else 2
 
 
 def cmd_status(a) -> int:
@@ -89,13 +98,13 @@ def cmd_status(a) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    # Fenster-Apps (PyInstaller, console=False) haben ggf. kein stdout/stderr
+    # Windowed apps (PyInstaller, console=False) may have no stdout/stderr
     if sys.stdout is None:
         sys.stdout = open(os.devnull, "w", encoding="utf-8")
     if sys.stderr is None:
         sys.stderr = open(os.devnull, "w", encoding="utf-8")
     argv = list(sys.argv[1:] if argv is None else argv)
-    # macOS übergibt beim Start aus dem Finder ggf. -psn_…
+    # macOS may pass -psn_… when launched from Finder
     argv = [x for x in argv if not x.startswith("-psn_")]
 
     if not argv or argv[0] not in COMMANDS and not argv[0].startswith("-"):
@@ -117,13 +126,19 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--zstd-level", type=int, help="0 = keine Kompression (Standard 3)")
     s.set_defaults(func=cmd_send)
 
-    r = sub.add_parser("receive", help="Transfer-Ordner prüfen, reparieren und entpacken")
+    r = sub.add_parser("receive", help="Transfer-Ordner prüfen, reparieren und entpacken "
+                                       "(setzt einen abgebrochenen Empfang automatisch fort)")
     r.add_argument("folder")
     r.add_argument("dest", help="Zielverzeichnis (darin wird der Ordner angelegt)")
     r.add_argument("--no-wait", action="store_true", help="nicht auf fehlende Pakete warten")
     r.set_defaults(func=cmd_receive)
 
-    st = sub.add_parser("status", help="schneller Überblick über einen Transfer-Ordner")
+    v = sub.add_parser("verify", help="alle Pakete und den Inhalt prüfen, ohne zu entpacken")
+    v.add_argument("folder")
+    v.add_argument("--quick", action="store_true", help="nur Pakete prüfen, Inhalt nicht dekodieren")
+    v.set_defaults(func=cmd_verify)
+
+    st = sub.add_parser("status", help="schneller Überblick über einen Transfer-Ordner (lädt nichts)")
     st.add_argument("folder")
     st.set_defaults(func=cmd_status)
 
@@ -143,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
         return 130
     except Cancelled:
         return 130
-    except Exception as exc:  # noqa: BLE001 – für die Konsole lesbar ausgeben
-        logging.getLogger(__name__).exception("Befehl %s fehlgeschlagen", a.cmd)
+    except Exception as exc:  # noqa: BLE001 – print readable message for the console
+        logging.getLogger(__name__).exception("Command %s failed", a.cmd)
         print(f"\nFehler: {exc}", file=sys.stderr)
         return 1

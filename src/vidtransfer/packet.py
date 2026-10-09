@@ -1,12 +1,12 @@
-"""Paketformat.
+"""Packet format.
 
-Jedes Paket ist eine eigenständige Datei `sNNNNNN_II.vtp`:
+Every packet is a self-contained file `sNNNNNN_II.vtp`:
 
-    [80 Byte Header][Payload]
+    [80-byte header][payload]
 
-Der Header beschreibt, zu welchem Transfer/Stripe/Index das Paket gehört,
-und enthält den SHA-256 der Payload sowie eine CRC32 über den Header selbst.
-Dadurch lässt sich jedes Paket ohne Manifest auf Vollständigkeit prüfen.
+The header states which transfer/stripe/index the packet belongs to and
+carries the SHA-256 of the payload plus a CRC32 over the header itself, so
+every packet can be checked for integrity without the manifest.
 """
 
 from __future__ import annotations
@@ -59,15 +59,15 @@ class PacketHeader:
     @classmethod
     def unpack(cls, data: bytes) -> "PacketHeader":
         if len(data) < HEADER_SIZE:
-            raise PacketError("Header zu kurz")
+            raise PacketError("header too short")
         body, crc = data[:_BODY.size], data[_BODY.size:HEADER_SIZE]
         if _CRC.unpack(crc)[0] != zlib.crc32(body):
-            raise PacketError("Header-CRC falsch")
+            raise PacketError("header CRC mismatch")
         magic, version, k, m, index, tid, stripe, stripe_len, payload_len, sha = _BODY.unpack(body)
         if magic != MAGIC:
-            raise PacketError("kein VidTransfer-Paket")
+            raise PacketError("not a VidTransfer packet")
         if version != VERSION:
-            raise PacketError(f"unbekannte Paketversion {version}")
+            raise PacketError(f"unknown packet version {version}")
         return cls(k, m, index, tid, stripe, stripe_len, payload_len, sha)
 
 
@@ -81,18 +81,18 @@ def parse_packet_name(name: str) -> Optional[tuple[int, int]]:
 
 
 def block_size(stripe_len: int, k: int) -> int:
-    """Größe eines Blocks (= Paket-Payload) innerhalb eines Stripes."""
+    """Size of one block (= packet payload) within a stripe."""
     return max(1, -(-stripe_len // k))
 
 
 def data_len(stripe_len: int, k: int, index: int) -> int:
-    """Tatsächliche Nutzdatenlänge von Datenpaket `index` (Rest ist virtuelles Zero-Padding)."""
+    """Actual payload length of data packet `index` (the rest is virtual zero padding)."""
     b = block_size(stripe_len, k)
     return max(0, min(b, stripe_len - index * b))
 
 
 def read_header(path: Path) -> Optional[PacketHeader]:
-    """Liest nur den Header. Liefert None, falls Datei fehlt oder ungültig ist."""
+    """Read only the header. Returns None if the file is missing or invalid."""
     try:
         with open(path, "rb") as f:
             return PacketHeader.unpack(f.read(HEADER_SIZE))
@@ -101,7 +101,7 @@ def read_header(path: Path) -> Optional[PacketHeader]:
 
 
 def verify_packet(path: Path, cancel=None) -> Optional[PacketHeader]:
-    """Prüft Header, Dateigröße und SHA-256 der Payload (liest die ganze Datei)."""
+    """Check header, file size and payload SHA-256 (reads the whole file)."""
     try:
         with open(path, "rb") as f:
             hdr = PacketHeader.unpack(f.read(HEADER_SIZE))
@@ -111,11 +111,11 @@ def verify_packet(path: Path, cancel=None) -> Optional[PacketHeader]:
                 check_cancel(cancel)
                 chunk = f.read(min(READ_CHUNK, remaining))
                 if not chunk:
-                    return None  # abgeschnitten
+                    return None  # truncated
                 h.update(chunk)
                 remaining -= len(chunk)
             if f.read(1):
-                return None  # Datei länger als erwartet
+                return None  # longer than expected
     except (OSError, PacketError):
         return None
     return hdr if h.digest() == hdr.sha256 else None

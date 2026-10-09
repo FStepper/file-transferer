@@ -1,9 +1,9 @@
-"""Sender: Ordner → tar → zstd → Stripes → Pakete im Drive-Ordner.
+"""Sender: folder → tar → zstd → stripes → packets in the Drive folder.
 
-Der erzeugte Datenstrom ist deterministisch (sortierte Dateien, normierte
-tar-Header, zstd single-threaded). Wird ein abgebrochener Transfer erneut
-gestartet, entstehen deshalb exakt dieselben Pakete. Bereits vorhandene,
-identische Pakete im Drive werden übersprungen, defekte ersetzt.
+The generated stream is deterministic (sorted files, normalised tar headers,
+single-threaded zstd). Restarting an interrupted transfer therefore produces
+exactly the same packets: identical packets already in Drive are skipped,
+damaged ones are replaced.
 """
 
 from __future__ import annotations
@@ -40,24 +40,25 @@ log = logging.getLogger(__name__)
 MIB = 1 << 20
 IGNORED_NAMES = {".DS_Store", "Thumbs.db", "desktop.ini", "Icon\r", ".localized"}
 
+README_NAME = "README.txt"
 README_TEXT = """\
-Dieser Ordner wurde von VidTransfer erzeugt.
+This folder was created by VidTransfer.
 
-Er enthält den Ordner "{name}" in fehlertolerante Pakete (*.vtp) zerlegt.
-Zum Wiederherstellen diesen Ordner auf das VidTransfer-Symbol ziehen
-(oder: vidtransfer receive "<dieser Ordner>" "<Zielordner>").
+It contains the folder "{name}", split into fault-tolerant packets (*.vtp).
+To restore it, drag this folder onto the VidTransfer icon
+(or run: vidtransfer receive "<this folder>" "<destination>").
 
-Bitte nichts in diesem Ordner umbenennen oder löschen, bevor der Empfang
-abgeschlossen ist.
+Please do not rename or delete anything in this folder until the transfer
+has been received.
 """
 
 
 @dataclass
 class SendOptions:
-    k: int = 10                  # Datenpakete pro Stripe
-    m: int = 3                   # Paritätspakete pro Stripe
-    block_size: int = 32 * MIB   # Payload-Größe eines Pakets
-    zstd_level: int = 3          # 0 = keine Kompression
+    k: int = 10                  # data packets per stripe
+    m: int = 3                   # parity packets per stripe
+    block_size: int = 32 * MIB   # payload size of one packet
+    zstd_level: int = 3          # 0 = no compression
 
     def validate(self) -> None:
         if not (1 <= self.k <= 99 and 0 <= self.m <= 99 and self.k + self.m <= 100):
@@ -75,7 +76,7 @@ class SendOptions:
 
 @dataclass
 class SourceEntry:
-    rel: str          # POSIX-Pfad relativ zum Quellordner
+    rel: str          # POSIX path relative to the source folder
     path: Path
     is_dir: bool
     size: int
@@ -95,7 +96,7 @@ class SendResult:
     files: list = field(default_factory=list)
 
 
-# ---------------------------------------------------------------- Quelle
+# ---------------------------------------------------------------- source
 
 def _ignored(name: str) -> bool:
     return name in IGNORED_NAMES or name.startswith("._")
@@ -127,10 +128,10 @@ def source_signature(entries: list[SourceEntry]) -> str:
     return hashlib.sha256(json.dumps(sig, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
-# ---------------------------------------------------------------- Ziel
+# ---------------------------------------------------------------- target
 
 def _choose_target(drive_root: Path, name: str, signature: str, opts: SendOptions):
-    """Liefert (Zielordner, Transfer-ID, alte Manifestdaten|None)."""
+    """Return (target folder, transfer ID, previous manifest | None)."""
     i = 1
     while True:
         cand = drive_root / (name if i == 1 else f"{name} ({i})")
@@ -147,10 +148,10 @@ def _choose_target(drive_root: Path, name: str, signature: str, opts: SendOption
             return cand, uuid.uuid4().bytes, None
 
 
-# ---------------------------------------------------------------- Stream
+# ---------------------------------------------------------------- stream
 
 class _HashingReader:
-    """Liest eine Quelldatei für tarfile, berechnet dabei SHA-256 und meldet Fortschritt."""
+    """Reads a source file for tarfile while computing SHA-256 and reporting progress."""
 
     def __init__(self, f, on_bytes, cancel):
         self._f = f
@@ -167,7 +168,7 @@ class _HashingReader:
 
 
 class _StripeSink:
-    """Nimmt den komprimierten Strom entgegen und schneidet ihn in Stripes."""
+    """Receives the compressed stream and cuts it into stripes."""
 
     def __init__(self, staging: Path, stripe_bytes: int, on_stripe):
         self._path = staging / "stripe.bin"
@@ -218,7 +219,7 @@ class _StripeSink:
 
 
 def _publish(packet: Path, hdr: PacketHeader, target: Path) -> bool:
-    """Kopiert ein Paket ins Drive, sofern dort nicht schon ein identisches liegt."""
+    """Copy a packet into Drive unless an identical, intact one is already there."""
     dest = target / packet.name
     if read_header(dest) == hdr and verify_packet(dest) == hdr:
         packet.unlink()
@@ -230,7 +231,7 @@ def _publish(packet: Path, hdr: PacketHeader, target: Path) -> bool:
     return True
 
 
-# ---------------------------------------------------------------- Hauptfunktion
+# ---------------------------------------------------------------- entry point
 
 def send_folder(
     src: Path,
@@ -257,8 +258,8 @@ def send_folder(
 
     target, tid, old_manifest = _choose_target(drive_root, src.name, signature, opts)
     resumed = old_manifest is not None
-    log.info("Sende %s → %s (%s, %s)", src, target, human_bytes(total_bytes),
-             "Fortsetzung" if resumed else "neu")
+    log.info("Sending %s -> %s (%s, %s)", src, target, human_bytes(total_bytes),
+             "resumed" if resumed else "new")
 
     manifest = {
         "transfer_id": tid.hex(),
@@ -273,7 +274,7 @@ def send_folder(
         "files": [{"path": e.rel, "size": e.size} for e in entries if not e.is_dir],
         "dirs": [e.rel for e in entries if e.is_dir],
     }
-    atomic_write_bytes(target / "LIESMICH.txt", README_TEXT.format(name=src.name).encode("utf-8"))
+    atomic_write_bytes(target / README_NAME, README_TEXT.format(name=src.name).encode("utf-8"))
     if not (old_manifest and old_manifest.get("status") == STATUS_COMPLETE):
         write_manifest(target, manifest)
 
@@ -304,7 +305,7 @@ def send_folder(
                 written += 1
             else:
                 skipped += 1
-        log.info("Stripe %d fertig (%s)", stripe, human_bytes(length))
+        log.info("Stripe %d done (%s)", stripe, human_bytes(length))
 
     try:
         sink = _StripeSink(staging, opts.k * opts.block_size, on_stripe)
@@ -349,7 +350,7 @@ def send_folder(
             f["sha256"] = file_hashes[f["path"]]
         write_manifest(target, manifest)
     except Cancelled:
-        log.info("Senden abgebrochen")
+        log.info("Sending cancelled")
         raise
     finally:
         shutil.rmtree(staging, ignore_errors=True)
@@ -357,6 +358,6 @@ def send_folder(
     msg = (f"Fertig: {sink.stripe} Stripes, {written} Pakete geschrieben"
            + (f", {skipped} bereits vorhanden" if skipped else ""))
     progress(total_bytes, total_bytes, msg)
-    log.info(msg)
+    log.info("Send finished: %d stripes, %d packets written, %d skipped", sink.stripe, written, skipped)
     return SendResult(target, tid.hex(), sink.stripe, sink.total, total_bytes,
                       written, skipped, resumed, manifest["files"])

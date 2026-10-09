@@ -23,7 +23,7 @@ jobs:
 
   build:
     needs: test
-    # App nur bei manuellem Start oder Versions-Tag bauen
+    # Build the app only when started manually or for a version tag
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     strategy:
       fail-fast: false
@@ -31,7 +31,7 @@ jobs:
         include:
           - runner: macos-14        # Apple Silicon (M1/M2/…)
             arch: arm64
-          - runner: macos-15-intel  # Intel-Macs (läuft auch auf Apple Silicon via Rosetta)
+          - runner: macos-15-intel  # Intel Macs (also runs on Apple Silicon via Rosetta)
             arch: x86_64
     runs-on: ${{ matrix.runner }}
     steps:

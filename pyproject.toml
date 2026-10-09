@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "vidtransfer"
 version = "0.1.0"
-description = "Fehlertolerante Übertragung großer Ordner über Google Drive (Erasure Coding)"
+description = "Fault-tolerant transfer of large folders via Google Drive (erasure coding)"
 requires-python = ">=3.10"
 dependencies = [
     "zfec>=1.6",

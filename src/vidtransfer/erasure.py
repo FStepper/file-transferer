@@ -1,12 +1,11 @@
-"""Reed-Solomon-Erasure-Coding für einen Stripe (über zfec).
+"""Reed-Solomon erasure coding for one stripe (via zfec).
 
-Ein Stripe sind `stripe_len` Bytes des Datenstroms. Er wird in k gleich große
-Blöcke der Länge B aufgeteilt (der letzte wird virtuell mit Nullen aufgefüllt),
-daraus entstehen m Paritätsblöcke. Aus beliebigen k der k+m Pakete lässt sich
-der Stripe wiederherstellen.
+A stripe is `stripe_len` bytes of the data stream. It is split into k blocks of
+equal length B (the last one is virtually padded with zeros), from which m
+parity blocks are computed. Any k of the k+m packets restore the stripe.
 
-Gearbeitet wird spaltenweise in Scheiben von `SLICE` Bytes, damit nie mehr als
-(k+m) × SLICE im Speicher liegen – unabhängig von der Paketgröße.
+Work is done column-wise in slices of `SLICE` bytes, so never more than
+(k+m) × SLICE bytes are held in memory, regardless of the packet size.
 """
 
 from __future__ import annotations
@@ -36,7 +35,7 @@ def encode_stripe(
     out_dir: Path,
     cancel=None,
 ) -> list[tuple[Path, PacketHeader]]:
-    """Erzeugt die k+m Pakete eines Stripes in `out_dir`."""
+    """Create the k+m packets of a stripe in `out_dir`."""
     b = block_size(stripe_len, k)
     lens = [data_len(stripe_len, k, i) for i in range(k)] + [b] * m
     paths = [out_dir / packet_name(stripe, i) for i in range(k + m)]
@@ -47,7 +46,7 @@ def encode_stripe(
     files = [open(p, "w+b") for p in paths]
     try:
         for f in files:
-            f.write(bytes(HEADER_SIZE))  # Platzhalter, Header kommt am Ende
+            f.write(bytes(HEADER_SIZE))  # placeholder, real header is written at the end
         with open(stripe_file, "rb") as src:
             for off in range(0, b, SLICE):
                 check_cancel(cancel)
@@ -60,7 +59,7 @@ def encode_stripe(
                         src.seek(i * b + off)
                         chunk = src.read(want)
                         if len(chunk) != want:
-                            raise IOError("Stripe-Datei kürzer als erwartet")
+                            raise IOError("stripe file shorter than expected")
                         files[i].write(chunk)
                         hashes[i].update(chunk)
                     blocks.append(_pad(chunk, n))
@@ -89,14 +88,14 @@ def decode_stripe(
     out_file: Path,
     cancel=None,
 ) -> None:
-    """Rekonstruiert die Stripe-Nutzdaten aus mindestens k gültigen Paketen.
+    """Reconstruct the stripe payload from at least k valid packets.
 
-    `packets` bildet Paketindex → Pfad ab (nur bereits geprüfte Pakete!).
+    `packets` maps packet index → path (already verified packets only!).
     """
     if len(packets) < k:
-        raise ValueError(f"nur {len(packets)} von mindestens {k} Paketen vorhanden")
+        raise ValueError(f"only {len(packets)} of at least {k} packets available")
     b = block_size(stripe_len, k)
-    # Datenpakete bevorzugen – die müssen nicht "gerechnet" werden
+    # Prefer data packets – they need no computation
     nums = tuple(sorted(packets)[:k])
     payload_lens = [data_len(stripe_len, k, i) if i < k else b for i in nums]
     lens = [data_len(stripe_len, k, i) for i in range(k)]

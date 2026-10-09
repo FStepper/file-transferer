@@ -1,4 +1,4 @@
-"""Einstiegspunkt für PyInstaller."""
+"""Entry point for PyInstaller."""
 
 from vidtransfer.cli import main
 

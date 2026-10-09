@@ -1,4 +1,4 @@
-"""Einstellungen (JSON) und Logdatei im Benutzerverzeichnis."""
+"""Settings (JSON) and log file in the user's profile."""
 
 from __future__ import annotations
 
