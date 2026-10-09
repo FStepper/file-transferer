@@ -340,6 +340,7 @@ stripe, a packet or a manifest is, and without ever wondering "is it done?".
 ### Decisions (2026-10-09)
 
 - **Setup:** two **sender Macs** and one **receiver Mac**. The roles are fixed.
+  Only one sender uploads at a time, so simultaneous sends do not happen.
 - **No setup assistant and no pre-flight checks** (former U7/U8 dropped).
 - **No Apple Developer account:** no notarization. Installation is done once by a
   technical person with an install script (U15).
@@ -349,20 +350,20 @@ stripe, a packet or a manifest is, and without ever wondering "is it done?".
 
 ### Consequences of two senders
 
-- **Separate folder per sender (must-have):** both senders write into the same
-  shared Drive folder. If both send a folder with the same name at about the
-  same time, each Mac creates it before Drive has synced, and the packet names
-  (`s000000_00.vtp`, …) collide. Deliveries therefore go to
-  `<Drive folder>/<sender name>/<folder name>`. The sender name defaults to the
-  Mac's computer name (`scutil --get ComputerName`) and can be changed in the
-  settings.
+- **No sender subfolders:** both senders write directly into the shared Drive
+  folder, as today. Collisions would only occur if two Macs sent a folder with
+  the same name at the same moment, before Drive has synced – this does not
+  happen in this setup. Sending folders with the same name one after another is
+  already handled: the sender sees the existing (synced) delivery and uses
+  `<name> (2)`.
 - **Sender name in the manifest**, so the receiver can show "von Kamera-Mac".
+  It defaults to the Mac's computer name (`scutil --get ComputerName`) and can be
+  changed in the settings.
 - **Shared Drive folder:** all three Macs must see the same folder. Either all
   three use the same Google account, or one folder (e.g. `VidTransfer`) is shared
   with edit rights and added to "Meine Ablage" on the other accounts (or a
   shared drive is used). Drive detection must also find `Shared drives` /
   `Geteilte Ablagen` folders. This is documented as a one-time setup step.
-- The receiver watches all sender subfolders.
 
 ### Target concept (Tk)
 
@@ -442,12 +443,12 @@ verify functions), "Protokoll öffnen", "Erweitert" (k, m, packet size, compress
   If that fails: keep the Dock icon plus a click on the drop zone. Single files
   and several items are accepted: every dropped folder becomes one delivery;
   loose files become one delivery named "Dateien <Datum>".
-- **U20 Sender subfolder and sender name** (see above), plus the delivery history.
+- **U20 Sender name in the manifest** (see above), plus the delivery history.
 
 **Phase 10 – receiver window and automatic receiving**
-- **U5/U6 Automatic receiving:** the receiver Mac watches all sender subfolders
-  in the Drive folder and receives every new delivery automatically into the
-  inbox (default `~/Movies/VidTransfer/<sender name>/<folder name>`), including
+- **U5/U6 Automatic receiving:** the receiver Mac watches the Drive folder and
+  receives every new delivery automatically into the inbox (default
+  `~/Movies/VidTransfer/<folder name>`), including
   resuming after restarts and the partial-recovery decision (automatic: restore
   everything that is there and wait for the rest). A notification says when a
   delivery has arrived.
@@ -519,8 +520,8 @@ signed and notarized DMG.
 8. ✔ **Unpacking, part 3:** `--only`, `list`, partial recovery, emergency mode
    without manifest, NFC/Windows name handling
 9. **UI, part 1 – sender:** plain-language texts and error catalogue, role-specific
-   main window with drop zone and delivery cards, settings window, sender
-   subfolder and sender name, drop onto the window, single files (U1–U4, U9, U20)
+   main window with drop zone and delivery cards, settings window, sender name
+   in the manifest, drop onto the window, single files (U1–U4, U9, U20)
 10. **UI, part 2 – receiver:** automatic receiving into the inbox, delivery list
     with sender name, upload progress from the packet count (U5, U6, U21)
 11. **Back channel:** receiver status and receipt in the delivery folder,
