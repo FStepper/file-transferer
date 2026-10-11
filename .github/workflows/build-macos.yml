@@ -22,7 +22,20 @@ jobs:
       - run: python -m pip install -e ".[dev]"
       # On macOS this also runs the install script (dry run) with the system bash 3.2
       # -v names each test as it runs; a test stuck for 5 min fails with a stack dump of all threads
-      - run: python -m pytest -v --timeout=300 --timeout-method=thread
+      - name: Tests
+        if: runner.os != 'macOS'
+        run: python -m pytest -v --timeout=300 --timeout-method=thread
+      # Tk on macOS only works reliably for the first Tk root of a process, so every
+      # window test (marker "gui") runs in a process of its own there
+      - name: Tests (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          python -m pytest -v --timeout=300 --timeout-method=thread -m "not gui"
+          failed=0
+          for t in $(python -m pytest --collect-only -q -m gui | grep '::'); do
+            python -m pytest -v --timeout=120 --timeout-method=thread "$t" || failed=1
+          done
+          exit $failed
       - name: Lint shell scripts
         if: runner.os == 'macOS'
         run: shellcheck --shell=bash -S warning "packaging/Install File Transferer.command" packaging/build_mac.sh

@@ -121,6 +121,7 @@ def receive_cards(app):
     return app.history.of_kind("receive")
 
 
+@pytest.mark.gui
 def test_new_delivery_is_received_automatically(env, tmp_path):
     drive, inbox, start = env
     app = start()
@@ -137,6 +138,7 @@ def test_new_delivery_is_received_automatically(env, tmp_path):
     assert len(receive_cards(app)) == 1
 
 
+@pytest.mark.gui
 def test_first_start_offers_existing_deliveries(env, tmp_path):
     drive, inbox, start = env
     Config.load().update(auto_initialized=False)
@@ -151,6 +153,7 @@ def test_first_start_offers_existing_deliveries(env, tmp_path):
     assert len(receive_cards(app)) == 1
 
 
+@pytest.mark.gui
 def test_own_deliveries_are_only_offered(env, tmp_path):
     drive, inbox, start = env
     app = start()
@@ -164,6 +167,7 @@ def test_own_deliveries_are_only_offered(env, tmp_path):
     assert d.state == OFFERED and "this computer" in d.message
 
 
+@pytest.mark.gui
 def test_removed_card_is_not_fetched_again(env, tmp_path):
     drive, inbox, start = env
     app = start()
@@ -178,6 +182,7 @@ def test_removed_card_is_not_fetched_again(env, tmp_path):
     assert receive_cards(again) == []
 
 
+@pytest.mark.gui
 def test_lost_parts_are_restored_and_completed_later(env, tmp_path, monkeypatch):
     drive, inbox, start = env
     monkeypatch.setattr(receiver, "GIVE_UP_SECONDS", 0)
@@ -206,6 +211,7 @@ def test_lost_parts_are_restored_and_completed_later(env, tmp_path, monkeypatch)
     assert (Path(d.result) / "b.mp4").read_bytes() == (src / "b.mp4").read_bytes()
 
 
+@pytest.mark.gui
 def test_free_drive_space_after_arrival(env, tmp_path):
     drive, inbox, start = env
     app = start()

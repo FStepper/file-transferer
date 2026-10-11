@@ -55,6 +55,7 @@ def wait_for(root, cond, seconds=60):
     return False
 
 
+@pytest.mark.gui
 def test_window_sends_and_receives(tmp_path, monkeypatch):
     monkeypatch.setenv(CONFIG_DIR_ENV, str(tmp_path / "config"))
     monkeypatch.setattr(desktop, "notify", lambda *a: None)

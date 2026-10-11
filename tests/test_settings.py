@@ -1,5 +1,6 @@
 """Settings, the main window and its behaviour (dialogs, modes, cards)."""
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -132,6 +133,8 @@ def test_delivery_goes_to_inbox_without_asking(app, tmp_path):
 
 # ---------------------------------------------------------------- modes and drops
 
+@pytest.mark.gui
+@pytest.mark.skipif(sys.platform == "darwin", reason="needs two Tk roots in one process, which hangs on macOS")
 def test_mode_is_remembered(monkeypatch):
     dialogs = Dialogs()
     a = make_app(monkeypatch, dialogs)
