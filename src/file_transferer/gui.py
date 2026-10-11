@@ -807,6 +807,9 @@ class App:
                                without_manifest=job.options.get("without_manifest", False))
 
     def _poll(self) -> None:
+        if not self.root.winfo_exists():           # window closed: stop polling and watching
+            self._watch_root = None
+            return
         try:
             while True:
                 ev = self.events.get_nowait()
