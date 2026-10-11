@@ -29,8 +29,10 @@ echo "==> Build environment ($TARGET_ARCH)"
 run "$VENV/bin/python" -m pip install -q --upgrade pip
 run "$VENV/bin/python" -m pip install -q -e ".[dev]"
 
-echo "==> Tests"
-run "$VENV/bin/python" -m pytest -q
+if [[ -z "${SKIP_TESTS:-}" ]]; then      # CI runs the tests in a job of their own
+    echo "==> Tests"
+    run bash packaging/run_tests_mac.sh "$VENV/bin/python"
+fi
 
 echo "==> PyInstaller"
 run "$VENV/bin/python" -m PyInstaller --noconfirm --clean \

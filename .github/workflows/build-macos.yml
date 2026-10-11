@@ -28,20 +28,13 @@ jobs:
       - name: Tests
         if: runner.os != 'macOS'
         run: python -m pytest -v --timeout=300 --timeout-method=thread
-      # Tk on macOS only works reliably for the first Tk root of a process, so every
-      # window test (marker "gui") runs in a process of its own there
+      # Window tests run one process each on macOS (Tk limitation, see the script)
       - name: Tests (macOS)
         if: runner.os == 'macOS'
-        run: |
-          python -m pytest -v --timeout=300 --timeout-method=thread -m "not gui"
-          failed=0
-          for t in $(python -m pytest --collect-only -q -m gui | grep '::'); do
-            python -m pytest -v --timeout=120 --timeout-method=thread "$t" || failed=1
-          done
-          exit $failed
+        run: bash packaging/run_tests_mac.sh python
       - name: Lint shell scripts
         if: runner.os == 'macOS'
-        run: shellcheck --shell=bash -S warning "packaging/Install File Transferer.command" packaging/build_mac.sh
+        run: shellcheck --shell=bash -S warning "packaging/Install File Transferer.command" packaging/build_mac.sh packaging/run_tests_mac.sh
 
   build:
     needs: test
@@ -56,12 +49,15 @@ jobs:
           - runner: macos-15-intel  # Intel Macs (also runs on Apple Silicon via Rosetta)
             arch: x86_64
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Build
+        env:
+          SKIP_TESTS: "1"        # the test job above already ran them
         run: ./packaging/build_mac.sh
       - uses: actions/upload-artifact@v4
         with:
