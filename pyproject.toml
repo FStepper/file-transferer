@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pyinstaller>=6.10", "shellcheck-py"]
+dev = ["pytest>=8", "pytest-timeout>=2.3", "pyinstaller>=6.10", "shellcheck-py"]
 
 [project.scripts]
 file-transferer = "file_transferer.cli:main"
