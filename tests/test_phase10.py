@@ -1,6 +1,7 @@
 """Phase 10: watching the Drive folder, automatic receiving, freeing Drive space."""
 
 import random
+import sys
 import time
 import tkinter as tk
 from pathlib import Path
@@ -168,6 +169,8 @@ def test_own_deliveries_are_only_offered(env, tmp_path):
 
 
 @pytest.mark.gui
+@pytest.mark.skipif(sys.platform == "darwin",
+                    reason="restarts the app, i.e. a second Tk root in one process, which hangs on macOS")
 def test_removed_card_is_not_fetched_again(env, tmp_path):
     drive, inbox, start = env
     app = start()
