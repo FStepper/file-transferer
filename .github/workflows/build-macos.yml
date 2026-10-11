@@ -7,6 +7,9 @@ on:
     tags: ["v*"]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     strategy:
@@ -64,3 +67,38 @@ jobs:
         with:
           name: file-transferer-macOS-${{ matrix.arch }}
           path: dist/file-transferer-macOS-${{ matrix.arch }}.zip
+
+  # A pushed tag (v*) publishes both ZIPs as a GitHub Release with a stable download page
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: file-transferer-macOS-*
+          path: dist
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cat > notes.md <<'EOF'
+          macOS builds of File Transferer (not notarized by Apple).
+
+          - **Apple Silicon (M1/M2/M3 …):** `file-transferer-macOS-arm64.zip`
+          - **Intel:** `file-transferer-macOS-x86_64.zip`
+
+          Unzip, then double-click **Install File Transferer.command**. If macOS
+          blocks it: right-click → Open (macOS 15+: System Settings › Privacy &
+          Security › Open Anyway). Details are in `README-INSTALL.txt`.
+          EOF
+          ls -l dist
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.zip --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" dist/*.zip --title "File Transferer $TAG"               --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+          fi
