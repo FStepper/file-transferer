@@ -103,8 +103,12 @@ def test_many_stalled_packets_do_not_block_the_queue(transfer, hang):
     src, folder, dest = transfer
     for s in range(3):
         hang.update({(s, 0), (s, 1)})       # 6 stuck reads, 4 initial workers
+    t0 = time.monotonic()
     out = receive_folder(folder, dest, wait=False)
-    assert out.repaired_stripes >= 3
+    # A blocked queue would wait for the stuck reads (30 s). How many stripes end up
+    # repaired depends on timing (a slow runner may see stalled reads finish anyway).
+    assert time.monotonic() - t0 < 10
+    assert out.repaired_stripes >= 1
     assert (out.dest / "a.mp4").read_bytes() == (src / "a.mp4").read_bytes()
 
 

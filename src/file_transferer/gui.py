@@ -303,9 +303,9 @@ class App:
         self._update_watch()
         root.after(100, self._poll)
         if IS_MAC:
-            root.createcommand("::tk::mac::OpenDocument", lambda *p: self.handle_paths(list(p)))
-            root.createcommand("::tk::mac::ReopenApplication", root.deiconify)
-            root.createcommand("::tk::mac::Quit", self._on_close)
+            root.tk.createcommand("::tk::mac::OpenDocument", lambda *p: self.handle_paths(list(p)))
+            root.tk.createcommand("::tk::mac::ReopenApplication", root.deiconify)
+            root.tk.createcommand("::tk::mac::Quit", self._on_close)
         root.protocol("WM_DELETE_WINDOW", self._on_close)
         if paths:
             root.after(300, lambda: self.handle_paths(paths))
