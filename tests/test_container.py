@@ -8,16 +8,16 @@ from pathlib import Path
 
 import pytest
 
-import vidtransfer.prefetch as prefetch
-import vidtransfer.sender as sender
-from vidtransfer.container import (
+import file_transferer.prefetch as prefetch
+import file_transferer.sender as sender
+from file_transferer.container import (
     T_DIR, T_END, T_FILE, ContainerError, RecordHeader, RecordReader, RecordWriter, SourceChangedError,
 )
-from vidtransfer.manifest import STATUS_IN_PROGRESS, read_manifest
-from vidtransfer.packet import HEADER_SIZE, data_len, packet_name, read_header
-from vidtransfer.receiver import receive_folder
-from vidtransfer.sender import SendOptions, send_folder
-from vidtransfer.util import Cancelled
+from file_transferer.manifest import STATUS_IN_PROGRESS, read_manifest
+from file_transferer.packet import HEADER_SIZE, data_len, packet_name, read_header
+from file_transferer.receiver import receive_folder
+from file_transferer.sender import SendOptions, send_folder
+from file_transferer.util import Cancelled
 
 K, M = 4, 2
 OPTS = SendOptions(k=K, m=M, block_size=4096, zstd_level=3)

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from vidtransfer.util import atomic_write_bytes
+from file_transferer.util import atomic_write_bytes
 
 log = logging.getLogger(__name__)
 

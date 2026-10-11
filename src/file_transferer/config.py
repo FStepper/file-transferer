@@ -6,17 +6,20 @@ import json
 import logging
 import logging.handlers
 import os
+import shutil
 import sys
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Optional
 
-from vidtransfer import APP_NAME
-from vidtransfer.sender import MIB, SendOptions
-from vidtransfer.util import atomic_write_bytes
+from file_transferer import APP_NAME
+from file_transferer.sender import MIB, SendOptions
+from file_transferer.util import atomic_write_bytes
 
 # Overrides the settings directory, e.g. for tests or a separate local test setup
-CONFIG_DIR_ENV = "VIDTRANSFER_CONFIG_DIR"
+CONFIG_DIR_ENV = "FILE_TRANSFERER_CONFIG_DIR"
+# Folder name used before the app was renamed
+LEGACY_NAME = "VidTransfer"
 
 
 def config_dir() -> Path:
@@ -28,6 +31,9 @@ def config_dir() -> Path:
         d = Path(os.environ.get("APPDATA", Path.home())) / APP_NAME
     else:
         d = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP_NAME
+    legacy = d.with_name(LEGACY_NAME)
+    if not d.exists() and legacy.is_dir() and not os.environ.get(CONFIG_DIR_ENV):
+        shutil.copytree(legacy, d)              # settings and history from before the rename
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -101,7 +107,7 @@ class Config:
 
 
 def setup_logging(verbose: bool = False) -> Path:
-    path = log_dir() / "vidtransfer.log"
+    path = log_dir() / "file-transferer.log"
     handler = logging.handlers.RotatingFileHandler(path, maxBytes=5 * MIB, backupCount=3, encoding="utf-8")
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     root = logging.getLogger()

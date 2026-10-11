@@ -1,4 +1,4 @@
-# VidTransfer – Plan
+# File Transferer – Plan
 
 Goal: transfer a folder of large MP4/WAV files over an unstable connection and
 **reliably unpack it again** on the other side. Transport is handled by the
@@ -19,7 +19,7 @@ installation is needed.
   destination. The app verifies and repairs the packets, unpacks them and checks
   every file with SHA-256 (details: [Unpacking](#unpacking)).
 - Alternatively there are buttons in the window and a CLI
-  (`vidtransfer send|receive|verify|status|list`).
+  (`file-transferer send|receive|verify|status|list`).
 - The UI is currently aimed at technical users; the plan for a much simpler UI
   is in [Simplified UI and usability](#simplified-ui-and-usability).
 
@@ -144,7 +144,7 @@ so that every end-to-end test runs for both formats.
    - **Transient read errors:** a packet that fails is read once more before
      the stripe gives up. Background: on the development PC, cold reads
      occasionally returned single flipped bits (reproduced with a stdlib-only
-     test, most likely the RAM configuration). VidTransfer never produced wrong
+     test, most likely the RAM configuration). File Transferer never produced wrong
      output, because every error was caught by the packet, zstd or file hashes.
      The re-read now also avoids needless failures. A stream that still decodes
      wrongly raises a `TransferError`, and receiving again resumes.
@@ -165,7 +165,7 @@ so that every end-to-end test runs for both formats.
    - The state file is updated after every finished file.
 6. **Finish:** ✔
    - Every file in the manifest must be present and verified.
-   - A **receive report** (`VidTransfer-Report.txt`) is written into the restored
+   - A **receive report** (`file-transferer-report.txt`) is written into the restored
      folder: files, sizes, SHA-256, repaired stripes, duration.
    - Only then is `<name> (receiving)` renamed to `<name>`.
    - Then a notification is shown, and **„Im Finder zeigen“** becomes available.
@@ -174,7 +174,7 @@ so that every end-to-end test runs for both formats.
 
 ### Resuming after interruption ✔
 
-- The working folder contains `.vidtransfer-state.json` with the transfer ID and
+- The working folder contains `.file-transferer-state.json` with the transfer ID and
   the finished files (path, size, SHA-256, mtime), both verified ones and
   written-but-unverified ones (`.vtpart`).
 - On restart, finished files are checked quickly (size + mtime) and skipped. A
@@ -219,14 +219,14 @@ GUI offers it when a folder contains packets but no readable manifest):
 
 ### Further features
 
-- `vidtransfer verify <folder>` / button **„Nur prüfen“**: ✔ checks all k+m
+- `file-transferer verify <folder>` / button **„Nur prüfen“**: ✔ checks all k+m
   packets of every stripe, then decodes the whole stream and checks every file
   hash, without writing anything. It reports intact, repairable-only-with-parity
   and unrecoverable stripes. This is useful before the sender deletes its data.
   `--quick` checks packets only, `--without-manifest` works in emergency mode.
-- `vidtransfer list <folder>`: ✔ file list with size, compression and a quick
+- `file-transferer list <folder>`: ✔ file list with size, compression and a quick
   availability check per file (headers only, downloads nothing).
-- `vidtransfer receive <folder> <dest> --only "Audio/*.wav"`: ✔ restores single
+- `file-transferer receive <folder> <dest> --only "Audio/*.wav"`: ✔ restores single
   files (glob on the path or the file name, or a folder prefix, case-insensitive;
   repeatable). Only the stripes of these files are loaded; unrelated folders are
   not created. Requires format v2.
@@ -368,7 +368,7 @@ stripe, a packet or a manifest is, and without ever wondering "is it done?".
   It defaults to the Mac's computer name (`scutil --get ComputerName`) and can be
   changed in the settings.
 - **Shared Drive folder:** all Macs must see the same folder. Either they use the
-  same Google account, or one folder (e.g. `VidTransfer`) is shared with edit
+  same Google account, or one folder (e.g. `File Transferer`) is shared with edit
   rights and added to "Meine Ablage" on the other accounts (or a shared drive is
   used). Drive detection must also find `Shared drives` / `Geteilte Ablagen`
   folders. This is documented as a one-time setup step.
@@ -390,7 +390,7 @@ mode has exactly one main area and one list of deliveries.
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ VidTransfer       [ Senden | Empfangen ]   Einstellungen │
+│ File Transferer       [ Senden | Empfangen ]   Einstellungen │
 │                                                     │
 │  ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐  │
 │     Ordner mit Videos hierher ziehen                │
@@ -409,9 +409,9 @@ mode has exactly one main area and one list of deliveries.
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ VidTransfer       [ Senden | Empfangen ]   Einstellungen │
+│ File Transferer       [ Senden | Empfangen ]   Einstellungen │
 │ Neue Lieferungen kommen automatisch nach            │
-│ Filme › VidTransfer                                 │
+│ Filme › File Transferer                                 │
 │                                                     │
 │  Drehtag 3 · von Kamera-Mac · 212 GB                │
 │  ██████░░░░░░░░░░░░  Wird noch hochgeladen (35 %)    │
@@ -473,7 +473,7 @@ folder, "Lieferung manuell öffnen …" (old receive and verify functions),
 **Phase 10 – receiving**
 - **U5/U6 Automatic receiving:** in mode "Empfangen" the app watches the Drive
   folder and receives every new delivery automatically into the inbox (default
-  `~/Movies/VidTransfer/<folder name>`), including resuming after restarts. If
+  `~/Movies/File Transferer/<folder name>`), including resuming after restarts. If
   parts are lost for good, everything else is restored automatically
   (`(incomplete)`) and the card asks to send the folder again; the delivery is
   completed as soon as the missing packets appear. A notification says when a
@@ -491,7 +491,7 @@ folder, "Lieferung manuell öffnen …" (old receive and verify functions),
 
 **Phase 11 – installation**
 - **U15 Install script instead of notarization:** a double-clickable
-  `Install VidTransfer.command` next to the app copies it to /Applications,
+  `Install File Transferer.command` next to the app copies it to /Applications,
   removes the quarantine flag (`xattr -dr com.apple.quarantine`) and, if wanted,
   sets the Drive folder and the sender name. Done once per Mac by a technical
   person; users never see Gatekeeper dialogs.
@@ -558,20 +558,20 @@ upload time estimates).
     - lost parts: restore everything else automatically, then complete the
       delivery as soon as the packet count has grown and every stripe is complete
     - "Platz in Google Drive freigeben" deletes the delivery folder only if it
-      contains nothing but VidTransfer's own files of exactly this delivery
+      contains nothing but File Transferer's own files of exactly this delivery
     - the receiving page has a compact header instead of a drop zone; dropping
       onto the window still works; the program title was removed from the window
     - found along the way (Windows): replacing a file in the Drive folder while
       it is briefly open elsewhere failed with "access denied"; now retried
 11. ◐ **Installation:** install script (quarantine flag, Drive folder, sender name),
     optional start at login (U15, U16). Prepared, **not yet tested on a Mac**:
-    - `packaging/Install VidTransfer.command` (bash 3.2 compatible) copies
+    - `packaging/Install File Transferer.command` (bash 3.2 compatible) copies
       the app to /Applications (sudo only if needed), quits a running copy,
       removes the quarantine flag and asks for Drive folder (lists Drive folders
       and shared drives, suggests a subfolder), name, mode, inbox and start at login
-    - all settings go through the new `vidtransfer config` command, so the logic is
+    - all settings go through the new `file-transferer config` command, so the logic is
       in tested Python code; the script only asks and calls it
-    - start at login: LaunchAgent `app.vidtransfer.VidTransfer.login` (takes effect
+    - start at login: LaunchAgent `app.file-transferer.login` (takes effect
       at the next login); also a checkbox in the settings window on macOS
     - `build_mac.sh` ships a folder with the app, the script and `README-INSTALL.txt`
     - tested on Windows: dry run (`VT_DRY_RUN=1`) of the whole dialogue with Git

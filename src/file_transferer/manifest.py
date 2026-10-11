@@ -7,9 +7,9 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from vidtransfer.util import atomic_write_bytes
+from file_transferer.util import atomic_write_bytes
 
-FORMAT = "vidtransfer"
+FORMAT = "vidtransfer"   # format identifier, kept for compatibility
 FORMAT_VERSION = 2              # 1 = zstd-compressed tar stream, 2 = record container
 SUPPORTED_VERSIONS = (1, 2)
 MANIFEST_NAMES = ("manifest.json", "manifest.2.json", "manifest.3.json")

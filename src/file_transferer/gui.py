@@ -28,15 +28,15 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable, Optional
 
-from vidtransfer import APP_NAME, __version__, desktop, watch
-from vidtransfer.config import Config, log_dir
-from vidtransfer.drive import default_cloudstorage_dir, find_drive_roots
-from vidtransfer.friendly import ACTIONS, Eta, explain, running_text, size_line, when
-from vidtransfer.history import (
+from file_transferer import APP_NAME, __version__, desktop, watch
+from file_transferer.config import Config, log_dir
+from file_transferer.drive import default_cloudstorage_dir, find_drive_roots
+from file_transferer.friendly import ACTIONS, Eta, explain, running_text, size_line, when
+from file_transferer.history import (
     ACTIVE, DONE, FAILED, INCOMPLETE, OFFERED, PAUSED, QUEUED, RUNNING, Delivery, History, Seen, now_iso,
 )
-from vidtransfer.manifest import is_transfer_folder, read_manifest
-from vidtransfer.util import Cancelled, human_bytes
+from file_transferer.manifest import is_transfer_folder, read_manifest
+from file_transferer.util import Cancelled, human_bytes
 
 log = logging.getLogger(__name__)
 IS_MAC, IS_WIN = desktop.IS_MAC, desktop.IS_WIN
@@ -788,7 +788,7 @@ class App:
 
     def _run(self, job: Job, progress):
         if job.kind == SEND:
-            from vidtransfer.sender import send_files, send_folder
+            from file_transferer.sender import send_files, send_folder
 
             opts = self.cfg.send_options()
             if job.options.get("files"):
@@ -797,11 +797,11 @@ class App:
             return send_folder(Path(job.sources[0]), Path(job.target), opts, progress, job.cancel,
                                sender=job.sender)
         if job.kind == RECEIVE:
-            from vidtransfer.receiver import receive_folder
+            from file_transferer.receiver import receive_folder
 
             options = {k: v for k, v in job.options.items() if k in ("salvage", "without_manifest", "only")}
             return receive_folder(Path(job.sources[0]), Path(job.target), progress, job.cancel, **options)
-        from vidtransfer.receiver import verify_transfer
+        from file_transferer.receiver import verify_transfer
 
         return verify_transfer(Path(job.sources[0]), progress, job.cancel,
                                without_manifest=job.options.get("without_manifest", False))
@@ -842,7 +842,7 @@ class App:
             card.progress(done, total, msg)
 
     def _on_finished(self, job: Job, result, exc: Optional[BaseException]) -> None:
-        from vidtransfer.receiver import StripeUnavailableError
+        from file_transferer.receiver import StripeUnavailableError
 
         self.running = None
         if job.delivery_id:
@@ -905,7 +905,7 @@ class App:
         self.submit(Job(VERIFY, None, [str(folder)], None, folder.name, options))
 
     def _verified(self, job: Job, result, exc) -> None:
-        from vidtransfer.messages import verify_summary
+        from file_transferer.messages import verify_summary
 
         self.root.title(APP_NAME)
         if exc is not None:
@@ -1034,7 +1034,7 @@ class SettingsWindow:
         self.app.refresh()
 
     def close(self) -> None:
-        from vidtransfer.sender import MIB, SendOptions
+        from file_transferer.sender import MIB, SendOptions
 
         changes = {"sender_name": self.name_var.get().strip() or None, "auto_receive": self.auto_var.get()}
         try:

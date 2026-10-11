@@ -15,8 +15,8 @@ from pathlib import Path
 
 import zfec
 
-from vidtransfer.packet import HEADER_SIZE, PacketHeader, block_size, data_len, packet_name
-from vidtransfer.util import check_cancel
+from file_transferer.packet import HEADER_SIZE, PacketHeader, block_size, data_len, packet_name
+from file_transferer.util import check_cancel
 
 SLICE = 1 << 20
 

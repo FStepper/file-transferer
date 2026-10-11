@@ -8,10 +8,10 @@ import os
 import sys
 from pathlib import Path
 
-from vidtransfer import __version__
-from vidtransfer.config import Config, setup_logging
-from vidtransfer.drive import find_drive_roots
-from vidtransfer.util import Cancelled, human_bytes
+from file_transferer import __version__
+from file_transferer.config import Config, setup_logging
+from file_transferer.drive import find_drive_roots
+from file_transferer.util import Cancelled, human_bytes
 
 COMMANDS = {"send", "receive", "verify", "status", "list", "config", "gui"}
 
@@ -45,7 +45,7 @@ def _resolve_drive(arg: str | None) -> Path:
 
 
 def cmd_send(a) -> int:
-    from vidtransfer.sender import MIB, send_folder
+    from file_transferer.sender import MIB, send_folder
 
     opts = Config.load().send_options()
     for name in ("k", "m", "zstd_level"):
@@ -61,8 +61,8 @@ def cmd_send(a) -> int:
 
 
 def cmd_receive(a) -> int:
-    from vidtransfer.messages import receive_summary
-    from vidtransfer.receiver import StripeUnavailableError, receive_folder
+    from file_transferer.messages import receive_summary
+    from file_transferer.receiver import StripeUnavailableError, receive_folder
 
     try:
         res = receive_folder(Path(a.folder), Path(a.dest), _console_progress(), wait=not a.no_wait,
@@ -78,8 +78,8 @@ def cmd_receive(a) -> int:
 
 
 def cmd_verify(a) -> int:
-    from vidtransfer.messages import verify_summary
-    from vidtransfer.receiver import verify_transfer
+    from file_transferer.messages import verify_summary
+    from file_transferer.receiver import verify_transfer
 
     res = verify_transfer(Path(a.folder), _console_progress(), deep=not a.quick,
                           without_manifest=a.without_manifest)
@@ -88,7 +88,7 @@ def cmd_verify(a) -> int:
 
 
 def cmd_list(a) -> int:
-    from vidtransfer.recovery import list_transfer
+    from file_transferer.recovery import list_transfer
 
     man, files = list_transfer(Path(a.folder))
     if not man:
@@ -104,7 +104,7 @@ def cmd_list(a) -> int:
 
 
 def cmd_status(a) -> int:
-    from vidtransfer.receiver import transfer_status
+    from file_transferer.receiver import transfer_status
 
     man, stripes = transfer_status(Path(a.folder))
     if not man:
@@ -124,8 +124,8 @@ def cmd_status(a) -> int:
 
 def cmd_config(a) -> int:
     """Read or change settings without the window (used by the install script)."""
-    from vidtransfer import desktop
-    from vidtransfer.drive import find_drive_locations
+    from file_transferer import desktop
+    from file_transferer.drive import find_drive_locations
 
     cfg = Config.load()
     if a.list_drives:
@@ -183,10 +183,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if not argv or argv[0] not in COMMANDS and not argv[0].startswith("-"):
         setup_logging()
-        from vidtransfer.gui import run_gui
+        from file_transferer.gui import run_gui
         return run_gui(argv)
 
-    ap = argparse.ArgumentParser(prog="vidtransfer", description="Fault-tolerant transfer via a cloud folder")
+    ap = argparse.ArgumentParser(prog="file-transferer", description="Fault-tolerant transfer via a cloud folder")
     ap.add_argument("--version", action="version", version=__version__)
     ap.add_argument("-v", "--verbose", action="store_true")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -244,7 +244,7 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
     setup_logging(a.verbose)
     if a.cmd == "gui":
-        from vidtransfer.gui import run_gui
+        from file_transferer.gui import run_gui
         return run_gui(a.paths)
     try:
         return a.func(a)

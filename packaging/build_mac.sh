@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds dist/<arch>/VidTransfer.app (+ ZIP) on a Mac.
+# Builds dist/<arch>/file-transferer.app (+ ZIP) on a Mac.
 #
 #   ./packaging/build_mac.sh            # for the native architecture (M2: arm64)
 #   ./packaging/build_mac.sh x86_64     # Intel build on an Apple Silicon Mac (via Rosetta)
@@ -34,26 +34,26 @@ run "$VENV/bin/python" -m pytest -q
 
 echo "==> PyInstaller"
 run "$VENV/bin/python" -m PyInstaller --noconfirm --clean \
-    --distpath "dist/$TARGET_ARCH" --workpath "build/$TARGET_ARCH" packaging/VidTransfer.spec
+    --distpath "dist/$TARGET_ARCH" --workpath "build/$TARGET_ARCH" packaging/file-transferer.spec
 
-APP="dist/$TARGET_ARCH/VidTransfer.app"
+APP="dist/$TARGET_ARCH/file-transferer.app"
 echo "==> App self-test"
-run "$APP/Contents/MacOS/VidTransfer" --version
+run "$APP/Contents/MacOS/file-transferer" --version
 
 echo "==> Package (app + install script + instructions)"
-PKG="dist/$TARGET_ARCH/VidTransfer"
+PKG="dist/$TARGET_ARCH/file-transferer"
 rm -rf "$PKG"
 mkdir -p "$PKG"
-ditto "$APP" "$PKG/VidTransfer.app"
-cp "packaging/Install VidTransfer.command" "$PKG/"
-chmod +x "$PKG/Install VidTransfer.command"
+ditto "$APP" "$PKG/file-transferer.app"
+cp "packaging/Install File Transferer.command" "$PKG/"
+chmod +x "$PKG/Install File Transferer.command"
 cp packaging/README-INSTALL.txt "$PKG/"
 
-ZIP="dist/VidTransfer-macOS-$TARGET_ARCH.zip"
+ZIP="dist/file-transferer-macOS-$TARGET_ARCH.zip"
 rm -f "$ZIP"
 ditto -c -k --keepParent "$PKG" "$ZIP"
 echo
 echo "Done:"
 echo "  $APP"
-echo "  $ZIP  (folder VidTransfer with the app, the install script and README-INSTALL.txt)"
-echo "Install: unzip, then double-click 'Install VidTransfer.command' (see README-INSTALL.txt)."
+echo "  $ZIP  (folder file-transferer with the app, the install script and README-INSTALL.txt)"
+echo "Install: unzip, then double-click 'Install File Transferer.command' (see README-INSTALL.txt)."

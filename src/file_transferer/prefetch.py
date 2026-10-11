@@ -24,8 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
-from vidtransfer.packet import PacketHeader, packet_name, verify_packet
-from vidtransfer.util import Cancelled, check_cancel
+from file_transferer.packet import PacketHeader, packet_name, verify_packet
+from file_transferer.util import Cancelled, check_cancel
 
 log = logging.getLogger(__name__)
 

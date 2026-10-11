@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
-from vidtransfer.util import Cancelled, human_bytes
+from file_transferer.util import Cancelled, human_bytes
 
 # Actions a card can offer (key -> button text)
 ACTIONS = {
@@ -119,9 +119,9 @@ def size_line(size: int, files: int, sender: Optional[str] = None) -> str:
 
 def explain(exc: BaseException, kind: str) -> Explanation:
     """Error catalogue: one plain sentence and one action for each known problem."""
-    from vidtransfer.container import SourceChangedError
-    from vidtransfer.receiver import InsufficientSpaceError, StripeUnavailableError, TransferError
-    from vidtransfer.sender import DriveFolderMissingError, SourceMissingError
+    from file_transferer.container import SourceChangedError
+    from file_transferer.receiver import InsufficientSpaceError, StripeUnavailableError, TransferError
+    from file_transferer.sender import DriveFolderMissingError, SourceMissingError
 
     details = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).strip()
 
@@ -145,7 +145,7 @@ def explain(exc: BaseException, kind: str) -> Explanation:
             return e("Part of the delivery is missing in the cloud.", "salvage")
         return e("The delivery is not complete in the cloud yet.", "retry")
     if isinstance(exc, PermissionError):
-        return e("VidTransfer is not allowed to access a folder.", "open_privacy")
+        return e("File Transferer is not allowed to access a folder.", "open_privacy")
     if isinstance(exc, OSError) and exc.errno == errno.ENOSPC:
         return e("The disk is full – on this computer or in the cloud.", "retry")
     if isinstance(exc, TransferError):

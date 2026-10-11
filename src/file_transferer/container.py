@@ -31,7 +31,7 @@ from typing import Callable, Optional
 
 import zstandard
 
-from vidtransfer.util import check_cancel
+from file_transferer.util import check_cancel
 
 REC_MAGIC = b"VTRC"
 TRAILER_MAGIC = b"VTRE"

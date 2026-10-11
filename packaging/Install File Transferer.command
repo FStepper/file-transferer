@@ -1,8 +1,8 @@
 #!/bin/bash
-# VidTransfer installer for macOS – double-click it in Finder (it sits next to
-# VidTransfer.app in the downloaded folder).
+# File Transferer installer for macOS – double-click it in Finder (it sits next to
+# file-transferer.app in the downloaded folder).
 #
-# - copies VidTransfer.app to /Applications (asks for an admin password if needed)
+# - copies file-transferer.app to /Applications (asks for an admin password if needed)
 # - removes the quarantine flag, because the app is not notarized by Apple
 # - asks for the cloud folder (default: Google Drive), this Mac's name, the start mode and whether
 #   the app should start at login, and stores them via the app's own
@@ -12,15 +12,15 @@
 # arrays, no ${var,,}).
 #
 # Testing without a Mac (prints macOS-only commands instead of running them):
-#   VT_DRY_RUN=1 VT_SRC_APP=<any folder> VT_DEST_DIR=<folder> VT_APP_BIN=<vidtransfer command> \
-#     bash "Install VidTransfer.command"
+#   VT_DRY_RUN=1 VT_SRC_APP=<any folder> VT_DEST_DIR=<folder> VT_APP_BIN=<file-transferer command> \
+#     bash "Install File Transferer.command"
 
 cd "$(dirname "$0")" || exit 1
 
 DRY="${VT_DRY_RUN:-}"
-SRC_APP="${VT_SRC_APP:-$PWD/VidTransfer.app}"
+SRC_APP="${VT_SRC_APP:-$PWD/file-transferer.app}"
 DEST_DIR="${VT_DEST_DIR:-/Applications}"
-DEST_APP="$DEST_DIR/VidTransfer.app"
+DEST_APP="$DEST_DIR/file-transferer.app"
 NEED_SUDO=""
 
 say() { printf '%s\n' "$*"; }
@@ -87,7 +87,7 @@ vt() {
         # shellcheck disable=SC2086  # VT_APP_BIN may be a command with arguments
         $VT_APP_BIN "$@"
     else
-        "$DEST_APP/Contents/MacOS/VidTransfer" "$@"
+        "$DEST_APP/Contents/MacOS/file-transferer" "$@"
     fi
 }
 
@@ -107,19 +107,19 @@ expand_home() {
     esac
 }
 
-say "Install VidTransfer"
+say "Install File Transferer"
 say "==================="
 say ""
 
 if [ -z "$DRY" ] && [ "$(uname)" != "Darwin" ]; then
     fail "This script is meant for macOS."
 fi
-[ -d "$SRC_APP" ] || fail "VidTransfer.app was not found next to this script ($SRC_APP)."
+[ -d "$SRC_APP" ] || fail "file-transferer.app was not found next to this script ($SRC_APP)."
 
 # ---------------------------------------------------------------- copy the app
-if [ -z "$DRY" ] && pgrep -x VidTransfer >/dev/null 2>&1; then
-    say "VidTransfer is still running and will be quit …"
-    osascript -e 'quit app "VidTransfer"' >/dev/null 2>&1
+if [ -z "$DRY" ] && pgrep -x file-transferer >/dev/null 2>&1; then
+    say "File Transferer is still running and will be quit …"
+    osascript -e 'quit app id "app.file-transferer"' >/dev/null 2>&1
     sleep 2
 fi
 
@@ -128,7 +128,7 @@ if [ -z "$DRY" ] && [ ! -w "$DEST_DIR" ]; then
     NEED_SUDO=1
 fi
 
-say "Copying VidTransfer to $DEST_DIR …"
+say "Copying File Transferer to $DEST_DIR …"
 if [ -e "$DEST_APP" ]; then
     priv rm -rf "$DEST_APP" || fail "The old version could not be removed."
 fi
@@ -187,7 +187,7 @@ done
 
 DRIVE="$BASE"
 if [ -n "$FROM_LIST" ]; then
-    ask "   Subfolder for deliveries (empty = right here)" "VidTransfer"
+    ask "   Subfolder for deliveries (empty = right here)" "File Transferer"
     if [ -n "$REPLY" ]; then
         DRIVE="$BASE/$REPLY"
         mkdir -p "$DRIVE" || fail "Folder could not be created: $DRIVE"
@@ -223,7 +223,7 @@ else
 fi
 
 say ""
-if yes_no "Start VidTransfer automatically at login? (recommended for the receiving Mac)" "$LOGIN_DEFAULT"; then
+if yes_no "Start File Transferer automatically at login? (recommended for the receiving Mac)" "$LOGIN_DEFAULT"; then
     vt config --login on
 else
     vt config --login off
@@ -231,7 +231,7 @@ fi
 
 # ---------------------------------------------------------------- done
 say ""
-say "VidTransfer is installed (Applications › VidTransfer)."
+say "File Transferer is installed (Applications › File Transferer)."
 if yes_no "Open it now?" "y"; then
     run open "$DEST_APP"
 fi

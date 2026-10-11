@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from vidtransfer.receiver import ReceiveResult, VerifyResult
-from vidtransfer.util import human_bytes
+from file_transferer.receiver import ReceiveResult, VerifyResult
+from file_transferer.util import human_bytes
 
 
 def receive_summary(res: ReceiveResult) -> str:

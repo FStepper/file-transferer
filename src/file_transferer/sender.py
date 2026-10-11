@@ -28,14 +28,14 @@ from typing import Optional
 
 import zstandard
 
-from vidtransfer import __version__
-from vidtransfer.erasure import encode_stripe
-from vidtransfer.container import RecordWriter
-from vidtransfer.manifest import (
+from file_transferer import __version__
+from file_transferer.erasure import encode_stripe
+from file_transferer.container import RecordWriter
+from file_transferer.manifest import (
     FORMAT_VERSION, STATUS_COMPLETE, STATUS_IN_PROGRESS, format_version, read_manifest, write_manifest,
 )
-from vidtransfer.packet import PacketHeader, read_header, verify_packet
-from vidtransfer.util import (
+from file_transferer.packet import PacketHeader, read_header, verify_packet
+from file_transferer.util import (
     Cancelled, ProgressFn, atomic_write_bytes, check_cancel, human_bytes, null_progress, replace,
 )
 
@@ -46,11 +46,11 @@ IGNORED_NAMES = {".DS_Store", "Thumbs.db", "desktop.ini", "Icon\r", ".localized"
 
 README_NAME = "README.txt"
 README_TEXT = """\
-This folder was created by VidTransfer.
+This folder was created by File Transferer.
 
 It contains the folder "{name}", split into fault-tolerant packets (*.vtp).
-To restore it, drag this folder onto the VidTransfer icon
-(or run: vidtransfer receive "<this folder>" "<destination>").
+To restore it, drag this folder onto the File Transferer icon
+(or run: file-transferer receive "<this folder>" "<destination>").
 
 Please do not rename or delete anything in this folder until the transfer
 has been received.
@@ -401,7 +401,7 @@ def _send(name: str, entries: list[SourceEntry], drive_root: Path, opts: Optiona
     if not keep_complete:
         write_manifest(target, manifest)
 
-    staging = Path(tempfile.mkdtemp(prefix="vidtransfer-send-"))
+    staging = Path(tempfile.mkdtemp(prefix="file-transferer-send-"))
     out_dir = staging / "out"
     out_dir.mkdir()
     done = 0

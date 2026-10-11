@@ -5,12 +5,12 @@ import time
 
 import pytest
 
-import vidtransfer.prefetch as prefetch
-from vidtransfer.manifest import read_manifest
-from vidtransfer.packet import packet_name
-from vidtransfer.prefetch import PacketVerifier
-from vidtransfer.receiver import TransferError, receive_folder, verify_transfer
-from vidtransfer.sender import SendOptions, send_folder
+import file_transferer.prefetch as prefetch
+from file_transferer.manifest import read_manifest
+from file_transferer.packet import packet_name
+from file_transferer.prefetch import PacketVerifier
+from file_transferer.receiver import TransferError, receive_folder, verify_transfer
+from file_transferer.sender import SendOptions, send_folder
 
 K, M = 4, 2
 OPTS = SendOptions(k=K, m=M, block_size=4096, zstd_level=0)
@@ -174,7 +174,7 @@ def test_verify_retries_transient_errors(transfer, monkeypatch):
 def test_corrupt_stream_gives_transfer_error_and_resumes(transfer, monkeypatch):
     """A misread that slips past the packet checks surfaces as TransferError; a second
     receive resumes and succeeds."""
-    import vidtransfer.receiver as receiver
+    import file_transferer.receiver as receiver
 
     src, folder, dest = transfer
     real_read = receiver._StripeStream.read

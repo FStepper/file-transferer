@@ -23,7 +23,7 @@ jobs:
       - run: python -m pytest -q
       - name: Lint shell scripts
         if: runner.os == 'macOS'
-        run: shellcheck --shell=bash -S warning "packaging/Install VidTransfer.command" packaging/build_mac.sh
+        run: shellcheck --shell=bash -S warning "packaging/Install File Transferer.command" packaging/build_mac.sh
 
   build:
     needs: test
@@ -47,5 +47,5 @@ jobs:
         run: ./packaging/build_mac.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: VidTransfer-macOS-${{ matrix.arch }}
-          path: dist/VidTransfer-macOS-${{ matrix.arch }}.zip
+          name: file-transferer-macOS-${{ matrix.arch }}
+          path: dist/file-transferer-macOS-${{ matrix.arch }}.zip

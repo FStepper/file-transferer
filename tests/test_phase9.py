@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-import vidtransfer.desktop as desktop
-import vidtransfer.gui as gui
-from vidtransfer.config import CONFIG_DIR_ENV, Config
-from vidtransfer.friendly import ACTIONS
-from vidtransfer.history import DONE
-from vidtransfer.manifest import read_manifest
-from vidtransfer.receiver import receive_folder
-from vidtransfer.sender import SendOptions, SourceMissingError, send_files
+import file_transferer.desktop as desktop
+import file_transferer.gui as gui
+from file_transferer.config import CONFIG_DIR_ENV, Config
+from file_transferer.friendly import ACTIONS
+from file_transferer.history import DONE
+from file_transferer.manifest import read_manifest
+from file_transferer.receiver import receive_folder
+from file_transferer.sender import SendOptions, SourceMissingError, send_files
 
 OPTS = SendOptions(k=4, m=2, block_size=4096)
 

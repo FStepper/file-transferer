@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
-import vidtransfer.desktop as desktop
-import vidtransfer.gui as gui
-from vidtransfer.config import CONFIG_DIR_ENV, Config
-from vidtransfer.history import DONE, FAILED, INCOMPLETE, PAUSED, QUEUED, Delivery, History
-from vidtransfer.manifest import MANIFEST_NAMES
+import file_transferer.desktop as desktop
+import file_transferer.gui as gui
+from file_transferer.config import CONFIG_DIR_ENV, Config
+from file_transferer.history import DONE, FAILED, INCOMPLETE, PAUSED, QUEUED, Delivery, History
+from file_transferer.manifest import MANIFEST_NAMES
 
 
 @pytest.fixture(autouse=True)
@@ -211,8 +211,8 @@ def test_finished_jobs_update_cards(app, tmp_path):
 
 
 def test_errors_become_plain_language_with_one_action(app, tmp_path):
-    from vidtransfer.receiver import InsufficientSpaceError, StripeUnavailableError
-    from vidtransfer.util import Cancelled
+    from file_transferer.receiver import InsufficientSpaceError, StripeUnavailableError
+    from file_transferer.util import Cancelled
 
     a, dialogs = app
     folder = delivery_folder(tmp_path / "Drive", "Shoot")

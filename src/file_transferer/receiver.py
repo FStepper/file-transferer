@@ -11,7 +11,7 @@ Unpacking is crash-safe and resumable:
 - each file is written as ".<name>.vtpart" and only gets its real name once its
   SHA-256 matches, so a half-written or corrupt file never appears under its
   real name;
-- ".vidtransfer-state.json" records finished files, so an interrupted receive
+- ".file-transferer-state.json" records finished files, so an interrupted receive
   continues where it stopped (finished files are not written again).
 
 With format v2 and a complete manifest index, files are processed "targeted":
@@ -43,15 +43,15 @@ from typing import Optional
 
 import zstandard
 
-from vidtransfer import __version__
-from vidtransfer.container import T_DIR, T_END, T_FILE, ContainerError, RecordHeader, RecordReader
-from vidtransfer.erasure import decode_stripe
-from vidtransfer.manifest import STATUS_COMPLETE, format_version, read_manifest
-from vidtransfer.names import NameMapper
-from vidtransfer.packet import HEADER_SIZE, data_len, packet_name, parse_packet_name, read_header
-from vidtransfer.prefetch import LOOKAHEAD, PacketVerifier, StripeCheck
-from vidtransfer.recovery import synthesize_manifest
-from vidtransfer.util import (
+from file_transferer import __version__
+from file_transferer.container import T_DIR, T_END, T_FILE, ContainerError, RecordHeader, RecordReader
+from file_transferer.erasure import decode_stripe
+from file_transferer.manifest import STATUS_COMPLETE, format_version, read_manifest
+from file_transferer.names import NameMapper
+from file_transferer.packet import HEADER_SIZE, data_len, packet_name, parse_packet_name, read_header
+from file_transferer.prefetch import LOOKAHEAD, PacketVerifier, StripeCheck
+from file_transferer.recovery import synthesize_manifest
+from file_transferer.util import (
     Cancelled, ProgressFn, atomic_write_bytes, check_cancel, free_space, human_bytes,
     human_duration, null_progress, sleep_cancellable, unique_path,
 )
@@ -65,10 +65,10 @@ SPACE_RESERVE = 1.05
 
 RECEIVING_SUFFIX = " (receiving)"
 INCOMPLETE_SUFFIX = " (incomplete)"
-STATE_NAME = ".vidtransfer-state.json"
-WORK_DIR_NAME = ".vidtransfer-work"
+STATE_NAME = ".file-transferer-state.json"
+WORK_DIR_NAME = ".file-transferer-work"
 PART_SUFFIX = ".vtpart"
-REPORT_NAME = "VidTransfer-Report.txt"
+REPORT_NAME = "file-transferer-report.txt"
 _INTERNAL_NAMES = {STATE_NAME, WORK_DIR_NAME, REPORT_NAME}
 
 
@@ -901,7 +901,7 @@ def _write_report(dest: Path, man: dict, state: _ReceiveState, stream: _StripeSt
     total = sum(f["size"] for f in files)
     incomplete = bool(stats.failed or stats.unknown_damage)
     lines = [
-        "VidTransfer receive report",
+        "File Transferer receive report",
         "==========================",
         "",
         f"Transfer:          {man['name']}",
@@ -990,7 +990,7 @@ def receive_folder(
     if man is None and without_manifest:
         man = synthesize_manifest(folder)
         if man is None:
-            raise TransferError(f"No VidTransfer packets found in {folder}")
+            raise TransferError(f"No File Transferer packets found in {folder}")
     elif man is None:
         man = _wait_for_manifest(folder, wait, progress, cancel)
     synthetic = bool(man.get("synthetic"))
@@ -1171,7 +1171,7 @@ def _hash_tar(stream: _StripeStream, man: dict, res: VerifyResult, got: dict,
 def _verify_content(folder: Path, man: dict, res: VerifyResult, verifier: PacketVerifier,
                     progress: ProgressFn, cancel) -> None:
     """Decode the whole stream and compare every file hash with the manifest."""
-    work = Path(tempfile.mkdtemp(prefix="vidtransfer-verify-"))
+    work = Path(tempfile.mkdtemp(prefix="file-transferer-verify-"))
     stream = _StripeStream(folder, work, progress, cancel, wait=False, verifier=verifier, manifest=man)
     got: dict[str, str] = {}
     try:

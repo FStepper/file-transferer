@@ -1,17 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller spec for the macOS app bundle (also builds a Windows exe for testing).
-#   pyinstaller --noconfirm --clean packaging/VidTransfer.spec
+#   pyinstaller --noconfirm --clean packaging/file-transferer.spec
 import os
 import sys
 
 sys.path.insert(0, os.path.join(SPECPATH, "..", "src"))
-from vidtransfer import __version__  # noqa: E402
+from file_transferer import __version__  # noqa: E402
 
 a = Analysis(
     [os.path.join(SPECPATH, "launcher.py")],
     pathex=[os.path.join(SPECPATH, "..", "src")],
     # tkinterdnd2: its native tkdnd library is collected by the hook in pyinstaller-hooks-contrib
-    hiddenimports=["vidtransfer.gui", "vidtransfer.sender", "vidtransfer.receiver", "tkinterdnd2"],
+    hiddenimports=["file_transferer.gui", "file_transferer.sender", "file_transferer.receiver", "tkinterdnd2"],
     excludes=["pytest", "unittest", "pydoc", "PyInstaller"],
 )
 pyz = PYZ(a.pure)
@@ -21,7 +21,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="VidTransfer",
+    name="file-transferer",
     console=False,
     # Folder drops arrive via ::tk::mac::OpenDocument – no argv emulation needed
     argv_emulation=False,
@@ -29,18 +29,18 @@ exe = EXE(
     codesign_identity=None,
 )
 
-coll = COLLECT(exe, a.binaries, a.datas, name="VidTransfer")
+coll = COLLECT(exe, a.binaries, a.datas, name="file-transferer")
 
 if sys.platform == "darwin":
   app = BUNDLE(
     coll,
-    name="VidTransfer.app",
-    icon=os.path.join(SPECPATH, "VidTransfer.icns") if os.path.exists(os.path.join(SPECPATH, "VidTransfer.icns")) else None,
-    bundle_identifier="app.vidtransfer.VidTransfer",
+    name="file-transferer.app",
+    icon=os.path.join(SPECPATH, "file-transferer.icns") if os.path.exists(os.path.join(SPECPATH, "file-transferer.icns")) else None,
+    bundle_identifier="app.file-transferer",
     version=__version__,
     info_plist={
-        "CFBundleName": "VidTransfer",
-        "CFBundleDisplayName": "VidTransfer",
+        "CFBundleName": "File Transferer",
+        "CFBundleDisplayName": "File Transferer",
         "CFBundleShortVersionString": __version__,
         "CFBundleVersion": __version__,
         "LSMinimumSystemVersion": "11.0",
@@ -54,11 +54,11 @@ if sys.platform == "darwin":
             "LSHandlerRank": "None",
             "LSItemContentTypes": ["public.folder", "public.directory"],
         }],
-        "NSDesktopFolderUsageDescription": "VidTransfer reads folders to send and saves received folders.",
-        "NSDocumentsFolderUsageDescription": "VidTransfer reads folders to send and saves received folders.",
-        "NSDownloadsFolderUsageDescription": "VidTransfer saves received folders.",
-        "NSRemovableVolumesUsageDescription": "VidTransfer reads video folders from external drives.",
-        "NSNetworkVolumesUsageDescription": "VidTransfer reads video folders from network drives.",
-        "NSFileProviderDomainUsageDescription": "VidTransfer stores the packets in the cloud folder and reads them there.",
+        "NSDesktopFolderUsageDescription": "File Transferer reads folders to send and saves received folders.",
+        "NSDocumentsFolderUsageDescription": "File Transferer reads folders to send and saves received folders.",
+        "NSDownloadsFolderUsageDescription": "File Transferer saves received folders.",
+        "NSRemovableVolumesUsageDescription": "File Transferer reads video folders from external drives.",
+        "NSNetworkVolumesUsageDescription": "File Transferer reads video folders from network drives.",
+        "NSFileProviderDomainUsageDescription": "File Transferer stores the packets in the cloud folder and reads them there.",
     },
 )

@@ -14,9 +14,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from vidtransfer.manifest import MANIFEST_NAMES, STATUS_COMPLETE, read_manifest
-from vidtransfer.packet import parse_packet_name
-from vidtransfer.sender import README_NAME
+from file_transferer.manifest import MANIFEST_NAMES, STATUS_COMPLETE, read_manifest
+from file_transferer.packet import parse_packet_name
+from file_transferer.sender import README_NAME
 
 log = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ class NotADeliveryError(Exception):
 
 def delete_delivery(folder: Path, transfer_id: str) -> None:
     """Delete a delivery folder from the cloud folder – only if it contains nothing but
-    VidTransfer's own files of exactly this delivery (so nothing else can be lost)."""
+    File Transferer's own files of exactly this delivery (so nothing else can be lost)."""
     folder = Path(folder)
     man = read_manifest(folder)
     if not man or man["transfer_id"] != transfer_id:

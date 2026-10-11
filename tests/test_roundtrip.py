@@ -9,15 +9,15 @@ from pathlib import Path
 
 import pytest
 
-import vidtransfer.receiver as receiver
-from vidtransfer.manifest import MANIFEST_NAMES, STATUS_IN_PROGRESS, read_manifest, write_manifest
-from vidtransfer.packet import packet_name, verify_packet
-from vidtransfer.receiver import (
+import file_transferer.receiver as receiver
+from file_transferer.manifest import MANIFEST_NAMES, STATUS_IN_PROGRESS, read_manifest, write_manifest
+from file_transferer.packet import packet_name, verify_packet
+from file_transferer.receiver import (
     PART_SUFFIX, RECEIVING_SUFFIX, REPORT_NAME, STATE_NAME, InsufficientSpaceError,
     TransferError, _safe_target, receive_folder, transfer_status, verify_transfer,
 )
-from vidtransfer.sender import README_NAME, SendOptions, send_folder
-from vidtransfer.util import Cancelled
+from file_transferer.sender import README_NAME, SendOptions, send_folder
+from file_transferer.util import Cancelled
 
 K, M = 4, 2
 BASE = SendOptions(k=K, m=M, block_size=4096, zstd_level=3)
@@ -113,7 +113,7 @@ def test_report(env, opts):
     res = send_folder(src, drive, opts)
     out = receive_folder(res.target, dest, wait=False)
     text = out.report.read_text(encoding="utf-8")
-    assert "VidTransfer receive report" in text
+    assert "File Transferer receive report" in text
     for f in read_manifest(res.target)["files"]:
         assert f["sha256"] in text and f["path"] in text
 

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
-from vidtransfer.util import check_cancel
+from file_transferer.util import check_cancel
 
 MAGIC = b"VTPK"
 VERSION = 1
@@ -65,7 +65,7 @@ class PacketHeader:
             raise PacketError("header CRC mismatch")
         magic, version, k, m, index, tid, stripe, stripe_len, payload_len, sha = _BODY.unpack(body)
         if magic != MAGIC:
-            raise PacketError("not a VidTransfer packet")
+            raise PacketError("not a File Transferer packet")
         if version != VERSION:
             raise PacketError(f"unknown packet version {version}")
         return cls(k, m, index, tid, stripe, stripe_len, payload_len, sha)

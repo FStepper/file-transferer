@@ -6,17 +6,17 @@ from pathlib import Path
 
 import pytest
 
-import vidtransfer.prefetch as prefetch
-import vidtransfer.receiver as receiver
-from vidtransfer.manifest import MANIFEST_NAMES, read_manifest
-from vidtransfer.names import IS_WINDOWS, NameMapper
-from vidtransfer.packet import packet_name
-from vidtransfer.receiver import (
+import file_transferer.prefetch as prefetch
+import file_transferer.receiver as receiver
+from file_transferer.manifest import MANIFEST_NAMES, read_manifest
+from file_transferer.names import IS_WINDOWS, NameMapper
+from file_transferer.packet import packet_name
+from file_transferer.receiver import (
     INCOMPLETE_SUFFIX, REPORT_NAME, STATE_NAME, StripeUnavailableError, TransferError,
     receive_folder, verify_transfer,
 )
-from vidtransfer.recovery import list_transfer, synthesize_manifest
-from vidtransfer.sender import SendOptions, send_folder
+from file_transferer.recovery import list_transfer, synthesize_manifest
+from file_transferer.sender import SendOptions, send_folder
 
 K, M = 4, 2
 STRIPE = K * 4096
@@ -232,7 +232,7 @@ def test_nfc_everywhere(tmp_path):
 
 @pytest.mark.skipif(not IS_WINDOWS, reason="Windows path limit")
 def test_very_long_destination_paths_on_windows(tmp_path, monkeypatch):
-    import vidtransfer.sender as sender
+    import file_transferer.sender as sender
 
     src = tmp_path / "S"
     src.mkdir()
@@ -250,8 +250,8 @@ def test_very_long_destination_paths_on_windows(tmp_path, monkeypatch):
 
 def test_colon_in_top_level_name_is_restored(tmp_path, monkeypatch):
     """A top-level name with ':' (allowed on macOS) used to be skipped as unsafe."""
-    import vidtransfer.names as names
-    import vidtransfer.sender as sender
+    import file_transferer.names as names
+    import file_transferer.sender as sender
 
     src = tmp_path / "S"
     src.mkdir()

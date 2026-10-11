@@ -15,8 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from vidtransfer.manifest import STATUS_COMPLETE, read_manifest
-from vidtransfer.packet import HEADER_SIZE, block_size, data_len, packet_name, parse_packet_name, read_header
+from file_transferer.manifest import STATUS_COMPLETE, read_manifest
+from file_transferer.packet import HEADER_SIZE, block_size, data_len, packet_name, parse_packet_name, read_header
 
 log = logging.getLogger(__name__)
 
@@ -101,7 +101,7 @@ class FileInfo:
 
 def list_transfer(folder: Path) -> tuple[Optional[dict], list[FileInfo]]:
     """File list from the manifest index, with a quick availability check per file."""
-    from vidtransfer.receiver import transfer_status
+    from file_transferer.receiver import transfer_status
 
     man, status = transfer_status(folder)
     if not man:

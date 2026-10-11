@@ -1,4 +1,4 @@
-# VidTransfer
+# File Transferer
 
 Transfers large folders (MP4, WAV, …) reliably via a synced **cloud folder** –
 by default **Google Drive for desktop**, which the app finds by itself – even over
@@ -15,7 +15,7 @@ delivery has one status line and at most one button. Everything else is in
 delivery, log, advanced parameters).
 
 **Sending**
-1. Drag a folder (e.g. `Shoot Day 3`) onto the window or onto the VidTransfer
+1. Drag a folder (e.g. `Shoot Day 3`) onto the window or onto the File Transferer
    icon in the Dock – or click **Choose folder …**. Loose files can be
    dropped too; they become one delivery called `Files <date>`.
 2. The card shows *Preparing – 45 % · about 6 min left*
@@ -30,7 +30,7 @@ skipped and damaged ones replaced.
 **Receiving**
 1. Switch to **Receive** – that is all. The app watches the cloud folder
    and receives every new delivery **automatically** into the inbox, by default
-   `~/Movies/VidTransfer` (changeable in the settings). The card shows who sent it.
+   `~/Movies/File Transferer` (changeable in the settings). The card shows who sent it.
 2. While the sender is still uploading, the card says *Still uploading
    (35 %)*; receiving runs alongside and waits for the rest.
 3. The app verifies the packets, repairs missing ones, unpacks everything and
@@ -65,7 +65,7 @@ How unpacking stays safe:
 - Packets are downloaded and verified **in parallel**, a few stripes ahead of the
   one being unpacked. A packet that hangs (e.g. a Drive placeholder that does not
   download) is skipped after 5 minutes and replaced by parity.
-- At the end, `VidTransfer-Report.txt` in the restored folder lists every file with
+- At the end, `file-transferer-report.txt` in the restored folder lists every file with
   its size and SHA-256.
 
 **If parts are lost for good**
@@ -84,7 +84,7 @@ verified, but the app cannot tell whether files are missing.
 
 **Verify only**
 
-**Settings → Verify delivery …** (or `vidtransfer verify`) downloads and
+**Settings → Verify delivery …** (or `file-transferer verify`) downloads and
 checks all packets and the whole content, without unpacking anything. It reports
 whether the delivery is completely recoverable.
 
@@ -97,7 +97,7 @@ whether the delivery is completely recoverable.
 The cloud folder defaults to the Google Drive folder found on the computer, but it
 can be any folder – another sync client's folder, or a local one for testing: in
 **Settings**, click **Change …** next to "Cloud folder" and choose any local
-folder, e.g. `D:\VidTransfer-Test`. The app keeps that choice and never switches
+folder, e.g. `D:\File Transferer-Test`. The app keeps that choice and never switches
 back to the Drive folder by itself. Sending writes the delivery folder there. In
 mode "Receive" the app watches the same folder; deliveries sent from this
 computer appear as cards with **Receive** (they are not fetched unasked).
@@ -106,12 +106,12 @@ Every folder dialog remembers the folder that was opened last. On the command
 line, the target is given with `--drive`:
 
 ```bash
-vidtransfer send "D:\Footage\Shoot" --drive "D:\VidTransfer-Test"
-vidtransfer receive "D:\VidTransfer-Test\Shoot" "D:\Restored"
+file-transferer send "D:\Footage\Shoot" --drive "D:\File Transferer-Test"
+file-transferer receive "D:\File Transferer-Test\Shoot" "D:\Restored"
 ```
 
 To keep test settings (and the delivery list) separate from your normal ones,
-set the environment variable `VIDTRANSFER_CONFIG_DIR` to another folder before
+set the environment variable `FILE_TRANSFERER_CONFIG_DIR` to another folder before
 starting the app.
 
 ## Fault tolerance
@@ -128,34 +128,34 @@ Compression is decided per file: video and other already compressed formats
 is compressed only if a sample shrinks by at least 3 %.
 
 The overhead is `m / k` = 30 %. You can change these settings in
-`~/Library/Application Support/VidTransfer/config.json`. The log is in
-`~/Library/Logs/VidTransfer/`.
+`~/Library/Application Support/File Transferer/config.json`. The log is in
+`~/Library/Logs/File Transferer/`.
 
 ## Installation
 
-Prebuilt app: `VidTransfer-macOS-arm64.zip` (Apple Silicon: M1/M2/…) or
-`VidTransfer-macOS-x86_64.zip` (Intel; also runs on Apple Silicon via Rosetta).
-The ZIP contains a folder with `VidTransfer.app`, the install script
-`Install VidTransfer.command` and `README-INSTALL.txt`.
+Prebuilt app: `file-transferer-macOS-arm64.zip` (Apple Silicon: M1/M2/…) or
+`file-transferer-macOS-x86_64.zip` (Intel; also runs on Apple Silicon via Rosetta).
+The ZIP contains a folder with `file-transferer.app`, the install script
+`Install File Transferer.command` and `README-INSTALL.txt`.
 
-Once per Mac, double-click **`Install VidTransfer.command`**. The script:
+Once per Mac, double-click **`Install File Transferer.command`**. The script:
 - copies the app to **Applications** (asks for an admin password if needed),
 - removes the macOS block on the app (it is not notarized by Apple),
 - asks for the cloud folder (same folder on every Mac; lists the Google Drive
   folders it finds, including shared drives, and suggests a subfolder
-  `VidTransfer`), this Mac's name, whether the Mac mainly sends or receives, the
-  inbox (receiving Macs) and whether VidTransfer should start at login.
+  `File Transferer`), this Mac's name, whether the Mac mainly sends or receives, the
+  inbox (receiving Macs) and whether File Transferer should start at login.
 
 Because the script itself is not notarized either, macOS blocks it the first
 time: right-click → **Open**, or on macOS 15 and later **System Settings ›
 Privacy & Security › Open Anyway**. Alternatively, run it in Terminal:
 
 ```bash
-bash "Install VidTransfer.command"
+bash "Install File Transferer.command"
 ```
 
 All answers can be changed later in the app's settings. The script stores them
-through the app's own command line (`VidTransfer config …`), so it never edits
+through the app's own command line (`file-transferer config …`), so it never edits
 settings files itself. Details, including how to set up a shared Drive folder for
 different Google accounts: `packaging/README-INSTALL.txt`.
 
@@ -176,15 +176,15 @@ The Intel version can also be built on the M2 (runs via Rosetta):
 ./packaging/build_mac.sh x86_64
 ```
 
-Result: `dist/<arch>/VidTransfer.app` and `dist/VidTransfer-macOS-<arch>.zip`
+Result: `dist/<arch>/file-transferer.app` and `dist/file-transferer-macOS-<arch>.zip`
 (folder with the app, the install script and `README-INSTALL.txt`).
 
 The install script can be tried without a Mac (it then only prints the macOS
 commands):
 
 ```bash
-VT_DRY_RUN=1 VT_SRC_APP=<any folder> VT_DEST_DIR=<folder> VT_APP_BIN="python -m vidtransfer" \
-  bash "packaging/Install VidTransfer.command"
+VT_DRY_RUN=1 VT_SRC_APP=<any folder> VT_DEST_DIR=<folder> VT_APP_BIN="python -m file_transferer" \
+  bash "packaging/Install File Transferer.command"
 ```
 Alternatively, the GitHub workflow `build-macos` builds both variants (start it
 manually or push a `v*` tag).
@@ -192,7 +192,7 @@ manually or push a `v*` tag).
 ## Command line
 
 ```bash
-VT=/Applications/VidTransfer.app/Contents/MacOS/VidTransfer
+VT=/Applications/file-transferer.app/Contents/MacOS/file-transferer
 $VT send    ~/Videos/ShootDay3
 $VT status  "$HOME/Library/CloudStorage/GoogleDrive-…/My Drive/ShootDay3"   # quick, downloads nothing
 $VT verify  "<Drive folder>"                # check all packets + content, no unpacking
@@ -225,7 +225,7 @@ same; only the `.app` bundle and dropping onto the Dock icon are Mac-specific.
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -e ".[dev]"
 .\.venv\Scripts\python -m pytest
-.\.venv\Scripts\python -m vidtransfer        # GUI
+.\.venv\Scripts\python -m file_transferer        # GUI
 ```
 
 `packaging\build_windows.ps1` builds a test EXE for Windows (folders can be dropped

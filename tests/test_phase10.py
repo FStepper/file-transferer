@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-import vidtransfer.desktop as desktop
-import vidtransfer.gui as gui
-import vidtransfer.receiver as receiver
-from vidtransfer import watch
-from vidtransfer.config import CONFIG_DIR_ENV, Config
-from vidtransfer.history import DONE, INCOMPLETE, OFFERED, Delivery
-from vidtransfer.manifest import STATUS_IN_PROGRESS, read_manifest, write_manifest
-from vidtransfer.packet import packet_name
-from vidtransfer.sender import SendOptions, send_folder
+import file_transferer.desktop as desktop
+import file_transferer.gui as gui
+import file_transferer.receiver as receiver
+from file_transferer import watch
+from file_transferer.config import CONFIG_DIR_ENV, Config
+from file_transferer.history import DONE, INCOMPLETE, OFFERED, Delivery
+from file_transferer.manifest import STATUS_IN_PROGRESS, read_manifest, write_manifest
+from file_transferer.packet import packet_name
+from file_transferer.sender import SendOptions, send_folder
 
 K, M = 4, 2
 OPTS = SendOptions(k=K, m=M, block_size=4096)
@@ -222,7 +222,7 @@ def test_free_drive_space_after_arrival(env, tmp_path):
 def test_replace_retries_while_destination_is_busy(tmp_path, monkeypatch):
     """Windows: replacing a file that is open elsewhere (Drive client, a reader) fails briefly."""
     import os
-    from vidtransfer import util
+    from file_transferer import util
 
     real, calls = os.replace, []
 
@@ -238,7 +238,7 @@ def test_replace_retries_while_destination_is_busy(tmp_path, monkeypatch):
 
 
 def test_waiting_card_shows_incoming_percent():
-    from vidtransfer.friendly import Eta, running_text
+    from file_transferer.friendly import Eta, running_text
 
     assert running_text("receive", 0, 0, "Waiting for stripe 3", Eta(), 35).startswith(
         "Still uploading (35 %)")

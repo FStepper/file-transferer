@@ -36,10 +36,10 @@ def default_inbox() -> Path:
     """Where received deliveries go unless the user chose something else."""
     home = Path.home()
     if IS_MAC:
-        return home / "Movies" / "VidTransfer"
+        return home / "Movies" / "File Transferer"
     if IS_WIN:
-        return home / "Videos" / "VidTransfer"
-    return home / "VidTransfer"
+        return home / "Videos" / "File Transferer"
+    return home / "File Transferer"
 
 
 def reveal(path: Path) -> None:
@@ -126,12 +126,12 @@ class KeepAwake:
 
 # ---------------------------------------------------------------- start at login (macOS)
 
-LOGIN_LABEL = "app.vidtransfer.VidTransfer.login"
-DEFAULT_APP = Path("/Applications/VidTransfer.app")
+LOGIN_LABEL = "app.file-transferer.login"
+DEFAULT_APP = Path("/Applications/file-transferer.app")
 
 
 def app_bundle() -> Optional[Path]:
-    """The running .app bundle (…/VidTransfer.app), if started from one."""
+    """The running .app bundle (…/file-transferer.app), if started from one."""
     exe = Path(sys.executable)
     if getattr(sys, "frozen", False) and len(exe.parents) > 2 and exe.parents[2].suffix == ".app":
         return exe.parents[2]
