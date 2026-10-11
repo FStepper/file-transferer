@@ -64,9 +64,26 @@ jobs:
           name: file-transferer-macOS-${{ matrix.arch }}
           path: dist/file-transferer-macOS-${{ matrix.arch }}.zip
 
-  # A pushed tag (v*) publishes both ZIPs as a GitHub Release with a stable download page
+  build-windows:
+    needs: test
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: powershell -ExecutionPolicy Bypass -File packaging/build_windows.ps1 -SkipTests
+      - uses: actions/upload-artifact@v4
+        with:
+          name: file-transferer-windows-x64
+          path: dist/file-transferer-windows-x64.zip
+
+  # A pushed tag (v*) publishes all ZIPs as a GitHub Release with a stable download page
   release:
-    needs: build
+    needs: [build, build-windows]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -74,7 +91,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: file-transferer-macOS-*
+          pattern: file-transferer-*
           path: dist
           merge-multiple: true
       - name: Publish release
@@ -83,14 +100,18 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           cat > notes.md <<'EOF'
-          macOS builds of File Transferer (not notarized by Apple).
+          Builds of File Transferer (not signed or notarized).
 
-          - **Apple Silicon (M1/M2/M3 …):** `file-transferer-macOS-arm64.zip`
-          - **Intel:** `file-transferer-macOS-x86_64.zip`
+          - **Mac, Apple Silicon (M1/M2/M3 …):** `file-transferer-macOS-arm64.zip`
+          - **Mac, Intel:** `file-transferer-macOS-x86_64.zip`
+          - **Windows (64-bit):** `file-transferer-windows-x64.zip`
 
-          Unzip, then double-click **Install File Transferer.command**. If macOS
-          blocks it: right-click → Open (macOS 15+: System Settings › Privacy &
-          Security › Open Anyway). Details are in `README-INSTALL.txt`.
+          **Mac:** unzip, then double-click **Install File Transferer.command**. If
+          macOS blocks it: right-click → Open (macOS 15+: System Settings ›
+          Privacy & Security › Open Anyway). Details are in `README-INSTALL.txt`.
+
+          **Windows:** unzip, run `file-transferer/file-transferer.exe`. If
+          SmartScreen warns, choose More info → Run anyway.
           EOF
           ls -l dist
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
