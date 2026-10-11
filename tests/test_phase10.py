@@ -16,6 +16,7 @@ from file_transferer.history import DONE, INCOMPLETE, OFFERED, Delivery
 from file_transferer.manifest import STATUS_IN_PROGRESS, read_manifest, write_manifest
 from file_transferer.packet import packet_name
 from file_transferer.sender import SendOptions, send_folder
+from conftest import new_root
 
 K, M = 4, 2
 OPTS = SendOptions(k=K, m=M, block_size=4096)
@@ -93,8 +94,7 @@ def env(tmp_path, monkeypatch):
     apps = []
 
     def start():
-        root = tk.Tk()
-        root.withdraw()
+        root = new_root()
         app = gui.App(root, [])
         apps.append(app)
         return app

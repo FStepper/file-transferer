@@ -1,6 +1,5 @@
 """Settings, the main window and its behaviour (dialogs, modes, cards)."""
 
-import tkinter as tk
 from pathlib import Path
 
 import pytest
@@ -10,6 +9,7 @@ import file_transferer.gui as gui
 from file_transferer.config import CONFIG_DIR_ENV, Config
 from file_transferer.history import DONE, FAILED, INCOMPLETE, PAUSED, QUEUED, Delivery, History
 from file_transferer.manifest import MANIFEST_NAMES
+from conftest import new_root
 
 
 @pytest.fixture(autouse=True)
@@ -50,8 +50,7 @@ def make_app(monkeypatch, dialogs, paths=()):
     monkeypatch.setattr(gui.filedialog, "askdirectory", dialogs.askdirectory)
     monkeypatch.setattr(gui.messagebox, "showwarning", lambda *a, **k: None)
     monkeypatch.setattr(gui.messagebox, "askyesno", lambda *a, **k: True)
-    root = tk.Tk()
-    root.withdraw()
+    root = new_root()
     a = gui.App(root, list(paths))
     a.submitted = []
     a.submit = a.submitted.append                  # do not actually run jobs

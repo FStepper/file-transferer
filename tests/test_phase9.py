@@ -1,7 +1,6 @@
 """Phase 9: loose files, sender name, and a real send → receive run through the window."""
 
 import time
-import tkinter as tk
 from pathlib import Path
 
 import pytest
@@ -14,6 +13,7 @@ from file_transferer.history import DONE
 from file_transferer.manifest import read_manifest
 from file_transferer.receiver import receive_folder
 from file_transferer.sender import SendOptions, SourceMissingError, send_files
+from conftest import new_root
 
 OPTS = SendOptions(k=4, m=2, block_size=4096)
 
@@ -67,8 +67,7 @@ def test_window_sends_and_receives(tmp_path, monkeypatch):
     src.mkdir()
     (src / "clip.mp4").write_bytes(bytes(range(256)) * 4000)
 
-    root = tk.Tk()
-    root.withdraw()
+    root = new_root()
     app = gui.App(root, [])
     try:
         app.handle_paths([str(src)])
