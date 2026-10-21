@@ -50,6 +50,7 @@ ditto "$APP" "$PKG/file-transferer.app"
 cp "packaging/Install File Transferer.command" "$PKG/"
 chmod +x "$PKG/Install File Transferer.command"
 cp packaging/README-INSTALL.txt "$PKG/"
+cp packaging/drive-diagnostics.sh "$PKG/"
 
 ZIP="dist/file-transferer-macOS-$TARGET_ARCH.zip"
 rm -f "$ZIP"

@@ -114,6 +114,9 @@ is still uploading) writes what macOS reports about a few files (extended attrib
 Spotlight metadata, whether a file is online-only) to
 `~/file-transferer-diagnostics.txt`. It only reads. If it shows an upload state,
 the sender can show real progress.
+Without the app installed, `packaging/drive-diagnostics.sh` does the same and a
+little more (a table of every packet with its flags and attributes); run it with
+`bash drive-diagnostics.sh "<delivery folder>"` and send `~/Desktop/drive-diagnostics.txt`.
 
 > Tip: In Drive's "Stream files" mode, packets are only downloaded when they are
 > read. That works, but it is slower. You can mark the delivery folder as

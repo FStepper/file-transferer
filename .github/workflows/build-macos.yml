@@ -34,7 +34,7 @@ jobs:
         run: bash packaging/run_tests_mac.sh python
       - name: Lint shell scripts
         if: runner.os == 'macOS'
-        run: shellcheck --shell=bash -S warning "packaging/Install File Transferer.command" packaging/build_mac.sh packaging/run_tests_mac.sh
+        run: shellcheck --shell=bash -S warning "packaging/Install File Transferer.command" packaging/build_mac.sh packaging/run_tests_mac.sh packaging/drive-diagnostics.sh
 
   build:
     needs: test
