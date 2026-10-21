@@ -13,7 +13,7 @@ from file_transferer.config import Config, setup_logging
 from file_transferer.drive import find_drive_roots
 from file_transferer.util import Cancelled, human_bytes
 
-COMMANDS = {"send", "receive", "verify", "status", "list", "config", "gui"}
+COMMANDS = {"send", "receive", "verify", "status", "list", "config", "diag", "gui"}
 
 
 def _console_progress():
@@ -104,8 +104,17 @@ def cmd_list(a) -> int:
 
 
 def cmd_status(a) -> int:
+    from file_transferer import watch
+    from file_transferer.messages import completeness_report
     from file_transferer.receiver import transfer_status
 
+    check = watch.check_delivery(Path(a.folder))
+    if a.missing:                    # plain list for scripts: one packet name per line, file names only
+        if check is None:
+            print("No valid manifest found.", file=sys.stderr)
+            return 1
+        print("\n".join(check.missing_names))
+        return 0 if not check.missing_names else 2
     man, stripes = transfer_status(Path(a.folder))
     if not man:
         print("No valid manifest found.")
@@ -119,7 +128,20 @@ def cmd_status(a) -> int:
           f"{len(bad)} not (yet) recoverable")
     for s in bad[:30]:
         print(f"  Stripe {s.stripe + 1}: {s.present}/{s.needed} needed packets")
+    if check is not None and check.missing_names:
+        print("\n" + completeness_report(check) + "\n(all names: file-transferer status --missing)")
     return 0 if not bad and man["status"] == "complete" else 2
+
+
+def cmd_diag(a) -> int:
+    from file_transferer import diag
+
+    text = diag.collect(Path(a.path).expanduser())
+    out = Path(a.output).expanduser() if a.output else diag.default_output()
+    out.write_text(text, encoding="utf-8")
+    print(text)
+    print(f"Saved to {out} - please send this file.")
+    return 0
 
 
 def cmd_config(a) -> int:
@@ -225,7 +247,15 @@ def main(argv: list[str] | None = None) -> int:
 
     st = sub.add_parser("status", help="quick overview of a transfer folder (downloads nothing)")
     st.add_argument("folder")
+    st.add_argument("--missing", action="store_true",
+                    help="only list the missing packet files, one per line (reads file names only)")
     st.set_defaults(func=cmd_status)
+
+    dg = sub.add_parser("diag", help="collect what macOS reports about files in a cloud folder "
+                                     "(read-only; to find out whether upload progress can be shown)")
+    dg.add_argument("path", help="a file, or a delivery folder inside the cloud folder")
+    dg.add_argument("-o", "--output", help="where to save the report (default: home folder)")
+    dg.set_defaults(func=cmd_diag)
 
     c = sub.add_parser("config", help="show or change settings (e.g. for the install script)")
     c.add_argument("--list-drives", action="store_true", help="list the cloud folders found (Google Drive)")

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 from file_transferer.manifest import MANIFEST_NAMES, STATUS_COMPLETE, read_manifest
-from file_transferer.packet import parse_packet_name
+from file_transferer.packet import packet_name, parse_packet_name
 from file_transferer.sender import README_NAME
 
 log = logging.getLogger(__name__)
@@ -72,6 +72,82 @@ def inspect(folder: Path) -> Optional[Found]:
     return Found(folder, man["transfer_id"], man.get("name", folder.name), man.get("sender"),
                  man.get("source_bytes", 0), len(man.get("files", [])), complete, present,
                  stripes * (k + m), recoverable)
+
+
+@dataclass
+class StripePresence:
+    stripe: int
+    present: list[int]        # packet indexes whose file exists
+    missing: list[int]
+    needed: int               # k: packets needed to restore the stripe
+
+    @property
+    def short_by(self) -> int:
+        return max(0, self.needed - len(self.present))
+
+
+@dataclass
+class DeliveryCheck:
+    """Which packet files of a delivery exist (by file name only, nothing is read)."""
+    name: str
+    complete: bool            # the sender has finished writing the manifest
+    k: int
+    m: int
+    stripes: list[StripePresence]
+
+    @property
+    def expected(self) -> int:
+        return len(self.stripes) * (self.k + self.m)
+
+    @property
+    def present(self) -> int:
+        return sum(len(s.present) for s in self.stripes)
+
+    @property
+    def missing_names(self) -> list[str]:
+        return [packet_name(s.stripe, i) for s in self.stripes for i in s.missing]
+
+    @property
+    def blocked(self) -> list[StripePresence]:
+        """Stripes that have fewer than k packets, i.e. cannot be restored yet."""
+        return [s for s in self.stripes if s.short_by]
+
+    @property
+    def more_needed(self) -> int:
+        """Fewest further packets that would make every stripe restorable."""
+        return sum(s.short_by for s in self.blocked)
+
+    @property
+    def restorable(self) -> bool:
+        return self.complete and not self.blocked
+
+
+def check_delivery(folder: Path) -> Optional[DeliveryCheck]:
+    """Compare the packet files in `folder` with what the manifest says there should be.
+
+    Uses file names only, so it is instant and downloads nothing. While the sender
+    is still running only the stripes seen so far are listed.
+    """
+    man = read_manifest(folder)
+    if not man:
+        return None
+    k, m = man["params"]["k"], man["params"]["m"]
+    try:
+        names = set(os.listdir(folder))
+    except OSError:
+        return None
+    complete = man.get("status") == STATUS_COMPLETE
+    if complete:
+        count = man["stripes"]
+    else:
+        seen = [parsed[0] for n in names if (parsed := parse_packet_name(n))]
+        count = max(seen) + 1 if seen else 0
+    stripes = []
+    for s in range(count):
+        have = [i for i in range(k + m) if packet_name(s, i) in names]
+        gone = [i for i in range(k + m) if i not in have]
+        stripes.append(StripePresence(s, have, gone, k))
+    return DeliveryCheck(man.get("name", folder.name), complete, k, m, stripes)
 
 
 def scan(root: Path) -> list[Found]:

@@ -88,6 +88,33 @@ verified, but the app cannot tell whether files are missing.
 checks all packets and the whole content, without unpacking anything. It reports
 whether the delivery is completely recoverable.
 
+**Is everything there? (completeness check)**
+
+**Settings → Check completeness …** (or `file-transferer status <folder>`) compares
+the packet files in a delivery folder with the manifest, by file name only. It is
+instant and downloads nothing. It says how many packets are missing, which stripes
+cannot be restored yet and how many more packets they need, e.g.
+`Stripe 1: missing 01, 03, 04, 09, 11, 12 (3 more needed)`.
+`file-transferer status <folder> --missing` prints just the names of the missing
+packet files, one per line (exit code 2 if any are missing).
+
+The app uses the same check while receiving: when a delivery stays incomplete, its
+card and its details name the missing packets and say the sender's upload may have
+stopped. A waiting card also notes when no new packet has arrived for 15 minutes.
+
+Why this happens: the sending app is done as soon as the packets are in the local
+cloud folder; the cloud client uploads them afterwards and can stop (Mac asleep,
+offline, client paused or in error). The sender can fix it by opening Google Drive,
+waiting until it shows everything as synced, and sending the folder again (only the
+missing packets are written).
+
+**Can the app see the upload state on the sender?** Not yet.
+`file-transferer diag <delivery folder>` (run it on the Mac that sent, while Drive
+is still uploading) writes what macOS reports about a few files (extended attributes,
+Spotlight metadata, whether a file is online-only) to
+`~/file-transferer-diagnostics.txt`. It only reads. If it shows an upload state,
+the sender can show real progress.
+
 > Tip: In Drive's "Stream files" mode, packets are only downloaded when they are
 > read. That works, but it is slower. You can mark the delivery folder as
 > "Available offline" in Drive.

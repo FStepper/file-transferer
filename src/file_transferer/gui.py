@@ -31,11 +31,12 @@ from typing import Callable, Optional
 from file_transferer import APP_NAME, __version__, desktop, watch
 from file_transferer.config import Config, log_dir
 from file_transferer.drive import default_cloudstorage_dir, find_drive_roots
-from file_transferer.friendly import ACTIONS, Eta, explain, running_text, size_line, when
+from file_transferer.friendly import ACTIONS, Eta, StallTracker, explain, running_text, size_line, stall_note, when
 from file_transferer.history import (
     ACTIVE, DONE, FAILED, INCOMPLETE, OFFERED, PAUSED, QUEUED, RUNNING, Delivery, History, Seen, now_iso,
 )
 from file_transferer.manifest import is_transfer_folder, read_manifest
+from file_transferer.messages import completeness_report, completeness_summary
 from file_transferer.util import Cancelled, human_bytes
 
 log = logging.getLogger(__name__)
@@ -110,6 +111,7 @@ class Card(ttk.Frame):
         self.d = d
         self.eta = Eta()
         self.incoming: Optional[int] = None      # % of the delivery already in the Drive folder
+        self.stalled: Optional[int] = None       # minutes without new packets (sender may have stopped)
         self._waiting = False
         self.columnconfigure(0, weight=1)
         self.title = ttk.Label(self, style="CardTitle.TLabel")
@@ -199,12 +201,13 @@ class Card(ttk.Frame):
             if not self.d.size:
                 self.d.size = total
                 self.meta.configure(text=self._meta_text())
-        self.status.configure(text=running_text(self.d.kind, done, total, msg, self.eta, self.incoming))
+        self.status.configure(text=running_text(self.d.kind, done, total, msg, self.eta, self.incoming,
+                                                self.stalled))
 
-    def set_incoming(self, percent: int) -> None:
-        self.incoming = percent
+    def set_incoming(self, percent: int, stalled: Optional[int] = None) -> None:
+        self.incoming, self.stalled = percent, stalled
         if self.d.state == RUNNING and self._waiting:
-            self.status.configure(text=running_text(self.d.kind, 0, 0, "Waiting", self.eta, percent))
+            self.status.configure(text=running_text(self.d.kind, 0, 0, "Waiting", self.eta, percent, stalled))
 
     def _on_button(self) -> None:
         action = "stop" if self.d.state in ACTIVE else self.d.action
@@ -295,6 +298,7 @@ class App:
         self.found: dict[str, watch.Found] = {}   # delivery folder -> last scan result
         self._watch_root: Optional[Path] = None
         self._watch_wakeup = threading.Event()
+        self.stalls = StallTracker()
 
         self._styles()
         self._build()
@@ -743,13 +747,15 @@ class App:
 
     def _apply_incoming(self, f: watch.Found) -> None:
         """Show how much of a delivery has arrived in Drive (receive cards that are waiting)."""
+        stalled = self.stalls.update(str(f.folder), f.present) if f.percent < 100 else None
         for d in self.history.of_kind(RECEIVE):
             if d.sources == [str(f.folder)]:
                 card = self._card(d)
                 if card and d.state == RUNNING:
-                    card.set_incoming(f.percent)
+                    card.set_incoming(f.percent, stalled)
                 elif card and d.state == OFFERED and not f.complete:
-                    card.status.configure(text=f"Still uploading ({f.percent} %) – not received yet.")
+                    card.status.configure(
+                        text=f"Still uploading ({f.percent} %) – not received yet." + stall_note(stalled))
 
     def _maybe_complete(self, f: watch.Found) -> None:
         """An incomplete delivery is fetched again as soon as more packets have arrived."""
@@ -871,6 +877,8 @@ class App:
             d.message, d.action = ex.message, ex.action
             if not isinstance(exc, Cancelled):
                 d.details = (d.details + "\n\n" + ex.details).strip()
+            if isinstance(exc, StripeUnavailableError):
+                self._add_completeness(d)
         elif d.kind == SEND:
             d.state, d.action, d.finished = DONE, None, now_iso()
             d.result, d.size, d.files = str(result.target), result.source_bytes, len(result.files)
@@ -896,11 +904,31 @@ class App:
                 d.state, d.action = INCOMPLETE, "fetch_missing"
                 d.message = ("1 file is still missing" if n == 1 else f"{n} files are still missing") + \
                     " – please send again on the sending Mac."
+                self._add_completeness(d)
                 found = self.found.get(d.sources[0])
                 d.options["packets_seen"] = found.present if found else -1
                 desktop.notify(APP_NAME, f"\"{d.name}\": files are still missing.")
         self.history.save()
         self._render(d)
+
+    def _add_completeness(self, d: Delivery) -> None:
+        """Say exactly which packets are missing in the cloud folder (card hint and details)."""
+        check = watch.check_delivery(Path(d.sources[0]))
+        if check is None or not check.missing_names:
+            return
+        d.hint = (d.hint + " " if d.hint else "") + completeness_summary(check)
+        d.details = (d.details + "\n\n" + completeness_report(check, max_names=0)).strip()
+
+    def check_completeness(self, folder: Path) -> None:
+        """Settings: which packet files of a delivery exist? Reads file names only."""
+        check = watch.check_delivery(folder)
+        if check is None:
+            messagebox.showwarning(APP_NAME, f"\"{folder.name}\" is not a readable delivery "
+                                             "(no valid manifest found).")
+            return
+        all_there = check.restorable and check.present == check.expected
+        show = messagebox.showinfo if all_there else messagebox.showwarning
+        show(APP_NAME, completeness_report(check) + "\n\nThe full list: file-transferer status --missing")
 
     # ------------------------------------------------------------ verify (settings)
     def start_verify(self, folder: Path) -> None:
@@ -976,10 +1004,12 @@ class SettingsWindow:
         ttk.Separator(f).grid(row=5, column=0, columnspan=3, sticky="we", pady=10)
         tools = ttk.Frame(f)
         tools.grid(row=6, column=0, columnspan=3, sticky="w")
-        ttk.Button(tools, text="Verify delivery …", command=self._verify).pack(side="left")
+        ttk.Button(tools, text="Check completeness …", command=self._check).grid(row=0, column=0, sticky="w")
+        ttk.Button(tools, text="Verify delivery …", command=self._verify).grid(row=0, column=1, sticky="w", padx=6)
         ttk.Button(tools, text="Open log",
-                   command=lambda: desktop.open_path(log_dir())).pack(side="left", padx=6)
-        ttk.Button(tools, text="Remove finished from list", command=self._clean).pack(side="left")
+                   command=lambda: desktop.open_path(log_dir())).grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Button(tools, text="Remove finished from list", command=self._clean).grid(
+            row=1, column=1, sticky="w", padx=6, pady=(6, 0))
 
         self.adv_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(f, text="Advanced", variable=self.adv_var, command=self._toggle_adv).grid(
@@ -1025,6 +1055,12 @@ class SettingsWindow:
             self.app.cfg.update(receive_dir=str(new))
             self.inbox_var.set(str(new))
             self.app._show_receive_header()
+
+    def _check(self) -> None:
+        p = self.app._ask_dir("Choose a delivery to check", self.app.cfg.last_transfer_dir,
+                              self.app.cfg.drive_root, str(default_cloudstorage_dir()))
+        if p:
+            self.app.check_completeness(p)
 
     def _verify(self) -> None:
         p = self.app._ask_dir("Choose a delivery to verify", self.app.cfg.last_transfer_dir,

@@ -87,16 +87,44 @@ class Eta:
         return remaining((total - done) * elapsed / progressed)
 
 
+STALL_MINUTES = 15       # no new packet for this long: the sender's upload has probably stopped
+
+
+class StallTracker:
+    """Notices deliveries whose packet count has not grown for a while."""
+
+    def __init__(self, minutes: int = STALL_MINUTES):
+        self.minutes = minutes
+        self._seen: dict[str, tuple[int, float]] = {}
+
+    def update(self, key: str, present: int, now: Optional[float] = None) -> Optional[int]:
+        """Record the current packet count; returns the minutes without progress once
+        that exceeds the limit, otherwise None."""
+        now = time.monotonic() if now is None else now
+        last = self._seen.get(key)
+        if last is None or present != last[0]:
+            self._seen[key] = (present, now)
+            return None
+        idle = int((now - last[1]) / 60)
+        return idle if idle >= self.minutes else None
+
+
+def stall_note(stalled: Optional[int]) -> str:
+    if not stalled:
+        return ""
+    return f" No new packets for {stalled} min – the sender's upload may have stopped."
+
+
 def running_text(kind: str, done: int, total: int, msg: str, eta: Eta,
-                 incoming: Optional[int] = None) -> str:
+                 incoming: Optional[int] = None, stalled: Optional[int] = None) -> str:
     """Status line while a job is running (the engine's technical message is not shown).
 
     `incoming`: how much of the delivery has arrived in the Drive folder (percent),
-    shown while receiving waits for the rest.
+    shown while receiving waits for the rest. `stalled`: minutes without new packets.
     """
     if kind == "receive" and msg.startswith("Waiting"):
         if incoming is not None and incoming < 100:
-            return f"Still uploading ({incoming} %) – receiving as it arrives …"
+            return f"Still uploading ({incoming} %) – receiving as it arrives …" + stall_note(stalled)
         return "Waiting for the cloud – the delivery is not complete yet …"
     verb = "Preparing" if kind == "send" else "Receiving"
     if total <= 0:

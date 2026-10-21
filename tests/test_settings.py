@@ -285,3 +285,54 @@ def test_reveal_quotes_path_with_spaces(tmp_path, monkeypatch):
     # One command line with only the path quoted – an argument list would quote
     # "/select,<path>" as a whole, and Explorer would open "Documents" instead.
     assert calls == [f'explorer /select,"{target.resolve()}"']
+
+
+# ---------------------------------------------------------------- completeness check
+
+def make_partial_delivery(tmp_path):
+    import random
+
+    from file_transferer.packet import packet_name
+    from file_transferer.sender import SendOptions, send_folder
+
+    src = tmp_path / "Shoot"
+    src.mkdir()
+    (src / "a.mp4").write_bytes(random.Random(1).randbytes(60_000))
+    drive = tmp_path / "Cloud"
+    drive.mkdir()
+    folder = send_folder(src, drive, SendOptions(k=4, m=2, block_size=4096)).target
+    for i in range(3):                                   # stripe 1 keeps 3 of the 4 packets it needs
+        (folder / packet_name(0, i)).unlink()
+    return folder
+
+
+def test_settings_check_reports_missing_packets(app, tmp_path, monkeypatch):
+    a, dialogs = app
+    shown = []
+    monkeypatch.setattr(gui.messagebox, "showwarning", lambda title, text, **k: shown.append(("warn", text)))
+    monkeypatch.setattr(gui.messagebox, "showinfo", lambda title, text, **k: shown.append(("info", text)))
+    folder = make_partial_delivery(tmp_path)
+    a.check_completeness(folder)
+    kind, text = shown[-1]
+    assert kind == "warn" and "Stripe 1: missing 00, 01, 02 (1 more needed)" in text
+    assert "status --missing" in text
+    a.check_completeness(tmp_path)                        # not a delivery
+    assert "not a readable delivery" in shown[-1][1]
+
+
+def test_incomplete_card_names_the_missing_packets(app, tmp_path):
+    from types import SimpleNamespace
+
+    a, dialogs = app
+    folder = make_partial_delivery(tmp_path)
+    a.handle_paths([str(folder)])
+    job = a.submitted[0]
+    a._on_started(job)
+    res = SimpleNamespace(dest=tmp_path / "Inbox" / "Shoot (incomplete)", sender=None, bytes=0, files=0,
+                          repaired_stripes=0, renamed={}, without_manifest=False,
+                          complete=False, missing=["a.mp4"])
+    a._on_finished(job, res, None)
+    d = a.history.get(job.delivery_id)
+    assert d.state == INCOMPLETE
+    assert "packets are missing in the cloud folder" in d.hint and "send the folder again" in d.hint
+    assert "Stripe 1: missing 00, 01, 02" in d.details
